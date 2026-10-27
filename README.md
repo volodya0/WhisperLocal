@@ -46,6 +46,7 @@ Same pipeline, macOS-native pieces: CGEventTap hotkey → AudioQueue capture (16
 2. Build whisper-server with Metal and the app bundle:
    ```
    scripts/build-mac.sh --install        # → artifacts/WhisperLocal.app, copied to ~/Applications
+   scripts/build-mac.sh --dmg            # or a drag-to-Applications disk image to share
    ```
    The first run builds whisper.cpp (pinned tag, see the script) into `WhisperLocal.Mac/Runtime/whisper`, not in git.
    Already have `brew install whisper-cpp`? Set `Whisper.ServerExe` to `"whisper-server"` and it is found in PATH.

@@ -8,6 +8,7 @@
 #
 #   scripts/build-mac.sh                  # → artifacts/WhisperLocal.app
 #   scripts/build-mac.sh --install        # also copies it to ~/Applications
+#   scripts/build-mac.sh --dmg            # also packs it into artifacts/WhisperLocal-<arch>.dmg (drag to Applications)
 #   WHISPER_CPP_TAG=v1.9.5 scripts/build-mac.sh --rebuild-whisper
 set -euo pipefail
 
@@ -18,10 +19,12 @@ WORK="$REPO/artifacts/build"
 APP="$REPO/artifacts/WhisperLocal.app"
 
 INSTALL=0
+DMG=0
 REBUILD_WHISPER=0
 for arg in "$@"; do
     case "$arg" in
         --install) INSTALL=1 ;;
+        --dmg) DMG=1 ;;
         --rebuild-whisper) REBUILD_WHISPER=1 ;;
         *) echo "Unknown option: $arg" >&2; exit 2 ;;
     esac
@@ -93,6 +96,20 @@ if [[ $INSTALL == 1 ]]; then
     rm -rf "$HOME/Applications/WhisperLocal.app"
     cp -R "$APP" "$HOME/Applications/"
     echo "==> Installed to ~/Applications/WhisperLocal.app"
+fi
+
+if [[ $DMG == 1 ]]; then
+    VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")"
+    DMG_PATH="$REPO/artifacts/WhisperLocal-$VERSION-${RID#osx-}.dmg"
+    STAGING="$WORK/dmg"
+    echo "==> Creating $DMG_PATH"
+    rm -rf "$STAGING" "$DMG_PATH"
+    mkdir -p "$STAGING"
+    cp -R "$APP" "$STAGING/"
+    ln -s /Applications "$STAGING/Applications" # drag-to-install target
+    hdiutil create -volname "WhisperLocal" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
+    echo "==> DMG: $DMG_PATH"
+    echo "    Not notarized: on another Mac, open it via System Settings → Privacy & Security → Open Anyway."
 fi
 
 echo

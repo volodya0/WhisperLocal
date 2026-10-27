@@ -47,6 +47,7 @@ Apple Silicon або Intel, macOS 12+.
 2. Зібрати whisper-server з Metal і саму програму:
    ```
    scripts/build-mac.sh --install        # → artifacts/WhisperLocal.app, копіюється в ~/Applications
+   scripts/build-mac.sh --dmg            # або образ диска, з якого програму перетягують у Applications
    ```
    Перший запуск збирає whisper.cpp (зафіксований тег, див. скрипт) у `WhisperLocal.Mac/Runtime/whisper` (не в git).
    Якщо вже стоїть `brew install whisper-cpp`, можна вказати `"whisper-server"` у `Whisper.ServerExe` — він знайдеться в PATH.
