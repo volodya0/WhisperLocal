@@ -7,3 +7,4 @@ artifacts/
 # whisper-server for macOS, built by scripts/build-mac.sh
 WhisperLocal.Mac/Runtime/
 .DS_Store
+__pycache__/

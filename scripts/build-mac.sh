@@ -75,6 +75,7 @@ echo "==> Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$REPO/WhisperLocal.Mac/Info.plist" "$APP/Contents/Info.plist"
+cp "$REPO/WhisperLocal.Mac/Resources/AppIcon.icns" "$APP/Contents/Resources/"
 cp -R "$WORK/publish/." "$APP/Contents/MacOS/"
 chmod +x "$APP/Contents/MacOS/WhisperLocal" "$APP/Contents/MacOS/whisper/whisper-server"
 

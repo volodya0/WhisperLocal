@@ -26,6 +26,11 @@
     <None Include="Runtime\**\*" Link="%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Menu bar icons (scripts/make-mac-icons.py); AppIcon.icns goes into the bundle via scripts/build-mac.sh -->
+  <ItemGroup>
+    <None Include="Resources\MenuBarIcon*.png" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- Default settings; copied to ~/Library/Application Support/WhisperLocal/config.json when newer -->
   <ItemGroup>
     <None Update="config.json" CopyToOutputDirectory="PreserveNewest" />

@@ -10,6 +10,13 @@ internal struct NSPoint(double x, double y)
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NSSize(double width, double height)
+{
+    public double Width = width;
+    public double Height = height;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NSRect(double x, double y, double width, double height)
 {
     public double X = x;
@@ -58,6 +65,7 @@ internal static class ObjC
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern IntPtr Send(IntPtr receiver, IntPtr selector, double a, double b, double c, double d);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern IntPtr Send(IntPtr receiver, IntPtr selector, [MarshalAs(UnmanagedType.I1)] bool a);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern IntPtr Send(IntPtr receiver, IntPtr selector, NSPoint a);
+    [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern IntPtr Send(IntPtr receiver, IntPtr selector, NSSize a);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern IntPtr Send(IntPtr receiver, IntPtr selector, NSRect a);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern IntPtr Send(IntPtr receiver, IntPtr selector, NSRect a, ulong b, ulong c, [MarshalAs(UnmanagedType.I1)] bool d);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] [return: MarshalAs(UnmanagedType.I1)] public static extern bool SendBool(IntPtr receiver, IntPtr selector);

@@ -1,3 +1,4 @@
+using WhisperLocal.Mac.Interop;
 using static WhisperLocal.Mac.Interop.ObjC;
 
 namespace WhisperLocal.Mac.Ui;
@@ -6,6 +7,11 @@ namespace WhisperLocal.Mac.Ui;
 internal sealed class StatusMenu : IDisposable
 {
     public enum Icon { Idle, Recording, Processing, Off }
+
+    // The waveform of the Windows tray icon as a template image (scripts/make-mac-icons.py), so macOS colours it
+    // for light/dark menu bars and the tint below applies; a system symbol if the file is missing
+    private static readonly Lazy<IntPtr> OnImage = new(() => LoadImage("MenuBarIcon.png", "waveform"));
+    private static readonly Lazy<IntPtr> OffImage = new(() => LoadImage("MenuBarIconOff.png", "mic.slash"));
 
     private readonly IntPtr _statusItem;
     private readonly IntPtr _menu;
@@ -49,17 +55,9 @@ internal sealed class StatusMenu : IDisposable
         if (button == IntPtr.Zero)
             return;
 
-        var symbol = icon switch
-        {
-            Icon.Recording => "mic.fill",
-            Icon.Processing => "ellipsis.circle",
-            Icon.Off => "mic.slash",
-            _ => "mic",
-        };
-        var image = Send(Class("NSImage"), Sel("imageWithSystemSymbolName:accessibilityDescription:"), Str(symbol), Str("WhisperLocal"));
+        var image = icon == Icon.Off ? OffImage.Value : OnImage.Value;
         if (image != IntPtr.Zero)
         {
-            Send(image, Sel("setTemplate:"), true);
             Send(button, Sel("setImage:"), image);
             Send(button, Sel("setTitle:"), Str(""));
         }
@@ -77,6 +75,21 @@ internal sealed class StatusMenu : IDisposable
         };
         Send(button, Sel("setContentTintColor:"), tint);
         Send(button, Sel("setToolTip:"), Str(tooltip));
+    }
+
+    /// <summary>Retained template image, 18×18 pt (the PNG is 36 px for Retina).</summary>
+    private static IntPtr LoadImage(string fileName, string fallbackSymbol)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, fileName);
+        var image = File.Exists(path)
+            ? Send(Send(Class("NSImage"), Sel("alloc")), Sel("initWithContentsOfFile:"), Str(path))
+            : Retain(Send(Class("NSImage"), Sel("imageWithSystemSymbolName:accessibilityDescription:"), Str(fallbackSymbol), Str("WhisperLocal")));
+        if (image == IntPtr.Zero)
+            return image;
+        if (File.Exists(path))
+            Send(image, Sel("setSize:"), new NSSize(18, 18));
+        Send(image, Sel("setTemplate:"), true);
+        return image;
     }
 
     public void Dispose()
