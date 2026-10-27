@@ -37,7 +37,15 @@ jobs:
           key: whisper-server-${{ matrix.arch }}-${{ hashFiles('scripts/build-mac.sh') }}
 
       - name: Build app and DMG
-        run: scripts/build-mac.sh --dmg
+        run: |
+          set -o pipefail
+          scripts/build-mac.sh --dmg 2>&1 | tee build.log
+
+      # The log tail as an annotation, readable from the checks API without access to the full logs
+      - name: Report build failure
+        if: failure()
+        run: |
+          echo "::error title=build-mac.sh failed::$(tail -n 80 build.log | awk '{ gsub(/%/, "%25"); gsub(/\r/, ""); printf "%s%%0A", $0 }')"
 
       - uses: actions/upload-artifact@v4
         with:
