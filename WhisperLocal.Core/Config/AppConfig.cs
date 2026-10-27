@@ -89,7 +89,11 @@ public sealed class WhisperConfig
     /// </remarks>
     public string ExtraArgs { get; set; } = OperatingSystem.IsMacOS() ? "-sns -t 4" : "-dev 0 -sns -t 8";
 
-    public string Language { get; set; } = "uk";
+    /// <summary>
+    /// "uk" forces one language (speech in another language comes out translated into it), "auto" detects any,
+    /// "uk,en" detects but accepts only the listed languages, falling back to the first.
+    /// </summary>
+    public string Language { get; set; } = OperatingSystem.IsMacOS() ? "uk,en" : "uk";
     public double Temperature { get; set; } = 0.0;
 
     /// <summary>Biases spelling of English terms; keep them in Latin script.</summary>

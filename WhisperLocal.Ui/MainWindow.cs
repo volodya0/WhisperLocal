@@ -24,9 +24,11 @@ public sealed class MainWindow : Window
     private readonly Ellipse _statusDot = DarkTheme.Dot(DarkTheme.Idle);
     private readonly TextBlock _status = DarkTheme.MutedLabel("", 13);
     private readonly StackPanel _setup = new() { Spacing = 4 };
-    private readonly ComboBox _hotkeys = new() { MinWidth = 300, FontSize = 13 };
+    private readonly ComboBox _hotkeys = DarkTheme.Dropdown(260);
     private readonly Button _record;
     private readonly TextBlock _hotkeyHint = DarkTheme.MutedLabel("");
+    private readonly ComboBox _languages = DarkTheme.Dropdown(260);
+    private readonly TextBlock _languageHint = DarkTheme.MutedLabel("");
     private readonly Ellipse _memoryDot = DarkTheme.Dot(DarkTheme.Idle);
     private readonly TextBlock _memory = DarkTheme.Label("");
     private readonly TextBlock _memoryDetail = DarkTheme.MutedLabel("");
@@ -39,6 +41,9 @@ public sealed class MainWindow : Window
 
     private List<HotkeyPreset> _hotkeyChoices = [];
     private string? _shownHotkey;
+    private string? _shownLanguage;
+    private bool _updatingLanguages;
+    private List<(string Title, string Value)> _languageChoices = [];
     private string? _shownSetup;
     private bool _updatingHotkeys;
     private bool _recording;
@@ -73,6 +78,7 @@ public sealed class MainWindow : Window
                     Header(),
                     DarkTheme.Section("Setup", _setup),
                     DarkTheme.Section("Hotkey", HotkeySection()),
+                    DarkTheme.Section("Language", new StackPanel { Spacing = 6, Children = { _languages, _languageHint } }),
                     DarkTheme.Section("Speech model", MemorySection()),
                     DarkTheme.Section("Statistics", StatsSection(),
                         DarkTheme.Segmented(["Today", "7 days", "All time"], _statsPeriod, i =>
@@ -87,6 +93,7 @@ public sealed class MainWindow : Window
         };
 
         _hotkeys.SelectionChanged += (_, _) => OnHotkeySelected();
+        _languages.SelectionChanged += (_, _) => OnLanguageSelected();
         _refresh.Tick += (_, _) => Refresh();
         _host.History.Changed += () => Dispatcher.UIThread.Post(() =>
         {
@@ -138,6 +145,7 @@ public sealed class MainWindow : Window
     {
         RefreshSetup();
         RefreshHotkey();
+        RefreshLanguage();
         RefreshMemory();
         if (_historyDirty)
             RefreshHistory();
@@ -326,6 +334,65 @@ public sealed class MainWindow : Window
     {
         _hotkeyHint.Text = text;
         _hotkeyHint.Foreground = brush ?? DarkTheme.Muted;
+    }
+
+    // ---- Language ----
+
+    private static readonly (string Title, string Value, string Hint)[] LanguagePresets =
+    [
+        ("Ukrainian + English", "uk,en", "Detects which of the two you speak, every dictation."),
+        ("Ukrainian + English + Russian", "uk,en,ru",
+            "Detects which of the three you speak. Short Ukrainian phrases may occasionally come out in Russian."),
+        ("Ukrainian only", "uk", "Always Ukrainian: English speech comes out translated into Ukrainian."),
+        ("English only", "en", "Always English: other speech comes out translated into English."),
+        ("Any language", "auto", "Detects any language; short phrases are occasionally misdetected."),
+    ];
+
+    private void RefreshLanguage()
+    {
+        var current = _host.Config.Current.Whisper.Language;
+        if (current == _shownLanguage)
+            return;
+        _shownLanguage = current;
+
+        _languageChoices = LanguagePresets.Select(p => (p.Title, p.Value)).ToList();
+        var index = _languageChoices.FindIndex(c => SameLanguages(c.Value, current));
+        if (index < 0)
+        {
+            _languageChoices.Add(($"Custom: {current}", current));
+            index = _languageChoices.Count - 1;
+        }
+
+        _updatingLanguages = true;
+        _languages.ItemsSource = _languageChoices.Select(c => c.Title).ToList();
+        _languages.SelectedIndex = index;
+        _updatingLanguages = false;
+        _languageHint.Text = index < LanguagePresets.Length
+            ? LanguagePresets[index].Hint
+            : "Set in the config (Whisper.Language): a code like \"de\", or a list like \"uk,en,pl\".";
+        _languageHint.Foreground = DarkTheme.Muted;
+    }
+
+    private static bool SameLanguages(string a, string b) =>
+        string.Equals(a.Replace(" ", ""), b.Replace(" ", ""), StringComparison.OrdinalIgnoreCase);
+
+    private void OnLanguageSelected()
+    {
+        var i = _languages.SelectedIndex;
+        if (_updatingLanguages || i < 0 || i >= _languageChoices.Count)
+            return;
+        try
+        {
+            ConfigEditor.SetValue(_host.Config.FilePath, "Whisper", "Language", _languageChoices[i].Value);
+            _languageHint.Text = i < LanguagePresets.Length ? $"Saved. {LanguagePresets[i].Hint}" : "Saved.";
+            _languageHint.Foreground = DarkTheme.Ok;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Saving the language failed", ex);
+            _languageHint.Text = $"Could not save the language: {ex.Message}";
+            _languageHint.Foreground = DarkTheme.Error;
+        }
     }
 
     // ---- Speech model ----

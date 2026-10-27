@@ -67,6 +67,10 @@ from Applications again):
 - setup checklist (Accessibility, microphone, whisper-server, model) with buttons to fix each, including an in-app
   model download;
 - hotkey selector: presets, or "Record…" to hold any combination (saved into the config, comments kept);
+- language: Ukrainian + English (detected per dictation, the default on macOS), Ukrainian + English + Russian,
+  Ukrainian only, English only or any (`Whisper.Language`: `"uk,en"`, `"uk,en,ru"`, `"uk"`, `"en"`, `"auto"`; any list of
+  codes works, the first is the fallback). A single fixed language makes Whisper write speech in
+  another language translated into it;
 - whether the model is in memory, with Unload / Load;
 - buttons for the config, the log, the logs and data folders;
 - statistics for today, the last 7 days and all time: dictations, words, speaking time and speaking rate
@@ -89,7 +93,8 @@ macOS specifics:
   Mac keys in the same place. For `Fn`, set System Settings → Keyboard → "Press 🌐 key to" → "Do Nothing".
 - Updates are manual: "Check for Updates…" (menu and setup window) looks at the GitHub releases of the repository
   the app was built from and, after asking, downloads the DMG, checks its checksum and signer, replaces the app and
-  restarts. To publish one, create a release with a tag like `v1.1.0`; the macOS workflow builds and attaches the DMG.
+  restarts. Every push to `macos-support` is released automatically as `v1.0.<build number>`; a tag like `v1.2.0`
+  is released with that version.
   With the `MACOS_CERT_P12` / `MACOS_CERT_PASSWORD` secrets (a self-signed code signing certificate is enough) every
   build carries the same signature, so the Accessibility permission survives updates.
 - `StartWithWindows` means "start at login" here: a LaunchAgent in `~/Library/LaunchAgents`.

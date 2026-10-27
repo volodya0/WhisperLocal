@@ -30,7 +30,7 @@ public sealed class TranscriptWindow : Window
         {
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            FontSize = 15,
+            FontSize = 13,
             Padding = new Thickness(12, 10),
             Background = DarkTheme.Card,
             BorderBrush = DarkTheme.CardBorder,

@@ -66,15 +66,20 @@ internal static class DarkTheme
         VerticalAlignment = VerticalAlignment.Center,
     };
 
+    /// <summary>Height shared by buttons and dropdowns, so controls in one row line up.</summary>
+    public const double ControlHeight = 28;
+
     public static Button Button(string text, Action onClick, bool accent = false, bool small = false)
     {
         var button = new Button
         {
             Content = text,
-            FontSize = small ? 12 : 13,
-            Padding = small ? new Thickness(10, 3) : new Thickness(14, 6),
-            MinWidth = small ? 0 : 96,
+            FontSize = 12,
+            Height = ControlHeight,
+            Padding = new Thickness(small ? 10 : 14, 0),
+            MinWidth = small ? 0 : 88,
             HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             CornerRadius = new CornerRadius(7),
         };
@@ -120,6 +125,18 @@ internal static class DarkTheme
             Child = bars,
         };
     }
+
+    /// <summary>Dropdown with the same height and text size as the buttons.</summary>
+    public static ComboBox Dropdown(double width) => new()
+    {
+        Width = width,
+        Height = ControlHeight,
+        MinHeight = ControlHeight,
+        FontSize = 12,
+        Padding = new Thickness(10, 0, 6, 0),
+        VerticalContentAlignment = VerticalAlignment.Center,
+        CornerRadius = new CornerRadius(7),
+    };
 
     /// <summary>Segmented control: one of several toggle buttons is selected.</summary>
     public static StackPanel Segmented(string[] options, int selected, Action<int> onSelect)

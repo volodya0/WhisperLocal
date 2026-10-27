@@ -63,13 +63,47 @@ public sealed class WhisperServerStt : ISpeechToText
         await WarmUpAsync(ct);
         LastUsedUtc = DateTime.UtcNow;
 
+        // "uk,en": detect the language, but only accept the listed ones. A fixed language makes Whisper write
+        // that language even for speech in another one (in effect translating it), so English came out Ukrainian.
+        var languages = ParseLanguages(c.Language);
+        string text;
+        if (languages.Count > 1)
+        {
+            var (detectedText, detected) = await RequestAsync(c, wav, "auto", ct);
+            var match = languages.FirstOrDefault(l => SameLanguage(l, detected));
+            if (match != null)
+            {
+                Log.Debug($"Language detected: {detected}");
+                text = detectedText;
+            }
+            else
+            {
+                // Typically a short Ukrainian phrase taken for Russian: transcribe again in the main language
+                Log.Info($"Detected language '{detected}' is not in Whisper.Language ({c.Language}), transcribing as '{languages[0]}'");
+                (text, _) = await RequestAsync(c, wav, languages[0], ct);
+            }
+        }
+        else
+        {
+            (text, _) = await RequestAsync(c, wav, languages[0], ct);
+        }
+
+        LastUsedUtc = DateTime.UtcNow;
+        return text;
+    }
+
+    /// <summary>One /inference call; returns the text and the language whisper-server reports (full name, e.g. "english").</summary>
+    private async Task<(string Text, string Language)> RequestAsync(WhisperConfig c, byte[] wav, string language, CancellationToken ct)
+    {
         using var form = new MultipartFormDataContent();
         var file = new ByteArrayContent(wav);
         file.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
         form.Add(file, "file", "audio.wav");
         form.Add(new StringContent(c.Temperature.ToString(CultureInfo.InvariantCulture)), "temperature");
-        form.Add(new StringContent("json"), "response_format");
-        form.Add(new StringContent(c.Language), "language");
+        // verbose_json reports the language; probabilities would cost another encoder pass
+        form.Add(new StringContent("verbose_json"), "response_format");
+        form.Add(new StringContent("true"), "no_language_probabilities");
+        form.Add(new StringContent(language), "language");
         if (!string.IsNullOrWhiteSpace(c.InitialPrompt))
             form.Add(new StringContent(c.InitialPrompt), "prompt");
 
@@ -85,9 +119,33 @@ public sealed class WhisperServerStt : ISpeechToText
         if (doc.RootElement.TryGetProperty("error", out var error))
             throw new InvalidOperationException($"whisper-server error: {error}");
 
-        LastUsedUtc = DateTime.UtcNow;
-        return doc.RootElement.TryGetProperty("text", out var text) ? text.GetString()?.Trim() ?? "" : "";
+        var text = doc.RootElement.TryGetProperty("text", out var t) ? t.GetString()?.Trim() ?? "" : "";
+        var detected = doc.RootElement.TryGetProperty("language", out var l) ? l.GetString() ?? "" : "";
+        return (text, detected);
     }
+
+    /// <summary>"uk", "auto" or a list "uk,en" (the first is the main language).</summary>
+    internal static List<string> ParseLanguages(string value)
+    {
+        var list = value.Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(l => l.ToLowerInvariant())
+            .Distinct()
+            .ToList();
+        return list.Count == 0 ? ["auto"] : list;
+    }
+
+    // whisper-server reports full names ("ukrainian"); the config uses codes ("uk")
+    private static readonly Dictionary<string, string> LanguageNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["en"] = "english", ["uk"] = "ukrainian", ["ru"] = "russian", ["pl"] = "polish", ["de"] = "german",
+        ["fr"] = "french", ["es"] = "spanish", ["it"] = "italian", ["pt"] = "portuguese", ["cs"] = "czech",
+        ["sk"] = "slovak", ["be"] = "belarusian", ["bg"] = "bulgarian", ["ro"] = "romanian", ["nl"] = "dutch",
+        ["sv"] = "swedish", ["fi"] = "finnish", ["tr"] = "turkish", ["ja"] = "japanese", ["zh"] = "chinese",
+    };
+
+    private static bool SameLanguage(string code, string reported) =>
+        string.Equals(code, reported, StringComparison.OrdinalIgnoreCase)
+        || (LanguageNames.TryGetValue(code, out var name) && string.Equals(name, reported, StringComparison.OrdinalIgnoreCase));
 
     public void Unload()
     {
@@ -232,7 +290,8 @@ public sealed class WhisperServerStt : ISpeechToText
     }
 
     private static string BuildArgs(WhisperConfig c, string model) =>
-        $"-m \"{model}\" --host {c.Host} --port {c.Port} -l {c.Language} {c.ExtraArgs}".Trim();
+        // A language list is chosen per request; the server itself only knows one language or "auto"
+        $"-m \"{model}\" --host {c.Host} --port {c.Port} -l {(ParseLanguages(c.Language) is [var single] ? single : "auto")} {c.ExtraArgs}".Trim();
 
     private static string BaseUrl(WhisperConfig c) => $"http://{c.Host}:{c.Port}";
 

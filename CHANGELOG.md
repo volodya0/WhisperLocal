@@ -10,6 +10,8 @@
 - Shared cross-platform windows (`WhisperLocal.Ui`, Avalonia): main window with setup checklist, hotkey selector
   (presets and recording), model memory with Unload/Load, file buttons and recent dictations with timing statistics;
   transcript window with Copy. Used by the macOS app; the Windows app can adopt it next.
+- `Whisper.Language` accepts a list (`"uk,en"`, the new macOS default): the language is detected per dictation and
+  only listed ones are accepted, so English speech no longer comes out in Ukrainian; selector in the main window.
 - macOS hotkeys can include character keys (e.g. Option + /); that key is swallowed while the combination is held.
 - Dark redesign of the shared windows (cards, status dots, statistics tiles); the success summary on the indicator
   stays 6 s (`Ui.ResultSeconds`); the history keeps the last 20 dictations.
