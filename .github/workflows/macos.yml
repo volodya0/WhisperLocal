@@ -14,15 +14,8 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15        # Apple Silicon
-            arch: arm64
-          - runner: macos-15-intel  # Intel
-            arch: x64
-    runs-on: ${{ matrix.runner }}
+    # Apple Silicon only; scripts/build-mac.sh still builds for Intel when run on an Intel Mac
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +27,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: WhisperLocal.Mac/Runtime/whisper
-          key: whisper-server-${{ matrix.arch }}-${{ hashFiles('scripts/build-mac.sh') }}
+          key: whisper-server-arm64-${{ hashFiles('scripts/build-mac.sh') }}
 
       - name: Build app and DMG
         run: |
@@ -56,7 +49,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WhisperLocal-macOS-${{ matrix.arch }}
+          name: WhisperLocal-macOS-arm64
           path: artifacts/*.dmg
           if-no-files-found: error
 
