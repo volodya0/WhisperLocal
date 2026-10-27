@@ -31,15 +31,6 @@ internal static class AudioConvert
         return ms.ToArray();
     }
 
-    /// <summary>Loads any file Media Foundation can decode (wav, mp3, m4a, flac) as 16 kHz mono PCM.</summary>
-    public static byte[] LoadFile(string path)
-    {
-        using var reader = new MediaFoundationReader(path);
-        using var ms = new MemoryStream();
-        reader.CopyTo(ms);
-        return To16kMono(ms.ToArray(), reader.WaveFormat);
-    }
-
     public static byte[] ToWav(byte[] pcm)
     {
         using var ms = new MemoryStream(pcm.Length + 64);

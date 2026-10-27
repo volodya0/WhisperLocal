@@ -9,7 +9,7 @@ using WhisperLocal.Native;
 namespace WhisperLocal.Stt;
 
 /// <summary>
-/// whisper.cpp whisper-server (Vulkan build) running as a managed child process, used over HTTP.
+/// whisper.cpp whisper-server (Vulkan build on Windows, Metal on macOS) running as a managed child process, used over HTTP.
 /// </summary>
 public sealed class WhisperServerStt : ISpeechToText
 {
@@ -79,7 +79,7 @@ public sealed class WhisperServerStt : ISpeechToText
 
     private async Task EnsureStartedAsync(WhisperConfig c, CancellationToken ct)
     {
-        var exe = AppPaths.Resolve(c.ServerExe);
+        var exe = ResolveServerExe(c.ServerExe);
         var model = AppPaths.Resolve(c.ModelPath);
         var args = BuildArgs(c, model);
         var signature = exe + "|" + args;
@@ -94,13 +94,17 @@ public sealed class WhisperServerStt : ISpeechToText
         }
 
         if (!File.Exists(exe))
-            throw new FileNotFoundException($"whisper-server not found: {exe}");
+            throw new FileNotFoundException(OperatingSystem.IsMacOS()
+                ? $"whisper-server not found: {exe}. Run scripts/build-mac.sh, or install it with 'brew install whisper-cpp' and set Whisper.ServerExe to \"whisper-server\""
+                : $"whisper-server not found: {exe}");
         if (!File.Exists(model))
         {
             // Create the folder so the user can drop the downloaded model straight into it
             Directory.CreateDirectory(Path.GetDirectoryName(model)!);
             throw new ModelNotFoundException(model);
         }
+
+        ChildProcessJob.KillOrphans();
 
         // Only the bundled server is used; anything else on the port is a configuration error
         if (await PingAsync(c, ct))
@@ -173,6 +177,7 @@ public sealed class WhisperServerStt : ISpeechToText
         _process = null;
         if (p == null)
             return;
+        var pid = p.Id;
         try
         {
             if (!p.HasExited)
@@ -185,7 +190,25 @@ public sealed class WhisperServerStt : ISpeechToText
         {
             Log.Warn($"Failed to stop whisper-server: {ex.Message}");
         }
+        ChildProcessJob.Remove(pid);
         p.Dispose();
+    }
+
+    /// <summary>
+    /// Relative paths are relative to the executable's directory; a bare file name ("whisper-server")
+    /// that is not there is looked up in PATH and the usual Homebrew locations.
+    /// </summary>
+    private static string ResolveServerExe(string serverExe)
+    {
+        var exe = AppPaths.ResolveRuntime(serverExe);
+        if (File.Exists(exe) || serverExe.IndexOfAny(['/', '\\']) >= 0)
+            return exe;
+
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        IEnumerable<string> dirs = path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+        if (OperatingSystem.IsMacOS())
+            dirs = dirs.Concat(["/opt/homebrew/bin", "/usr/local/bin"]); // apps started from Finder get a minimal PATH
+        return dirs.Select(d => Path.Combine(d, serverExe)).FirstOrDefault(File.Exists) ?? exe;
     }
 
     private static string BuildArgs(WhisperConfig c, string model) =>

@@ -2,9 +2,9 @@
 
 *Українською: [README.uk.md](README.uk.md)*
 
-Local push-to-talk dictation for Windows (Wispr Flow–style): hold a hotkey, speak, release —
+Local push-to-talk dictation for Windows and macOS (Wispr Flow–style): hold a hotkey, speak, release —
 the recognized text is pasted into the active window. Everything runs locally and portably on the GPU
-(bundled whisper.cpp Vulkan build); nothing is installed or auto-updated.
+(bundled whisper.cpp Vulkan build on Windows, Metal on macOS); nothing is installed or auto-updated.
 
 ```
 Hotkey (WH_KEYBOARD_LL) → WASAPI capture → 16 kHz mono
@@ -36,12 +36,56 @@ Settings come with the repository (`WhisperLocal\config.json`), nothing to copy.
 The whisper.cpp binaries are in the repository (`WhisperLocal\Runtime\whisper`, see `VERSION.md` there);
 the Vulkan build is vendor-neutral, no rebuild is needed for a different GPU.
 
+## macOS
+
+Same pipeline, macOS-native pieces: CGEventTap hotkey → AudioQueue capture (16 kHz mono) → whisper-server (Metal)
+→ filters → pasteboard + Cmd+V. A menu bar app (no Dock icon); Apple Silicon or Intel, macOS 12+.
+
+1. Install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), the Xcode Command Line Tools
+   (`xcode-select --install`) and CMake (`brew install cmake`).
+2. Build whisper-server with Metal and the app bundle:
+   ```
+   scripts/build-mac.sh --install        # → artifacts/WhisperLocal.app, copied to ~/Applications
+   ```
+   The first run builds whisper.cpp (pinned tag, see the script) into `WhisperLocal.Mac/Runtime/whisper`, not in git.
+   Already have `brew install whisper-cpp`? Set `Whisper.ServerExe` to `"whisper-server"` and it is found in PATH.
+3. Download the model into `~/Library/Application Support/WhisperLocal/models`:
+   ```
+   scripts/get-model.sh
+   ```
+   `ggml-large-v3-turbo.bin` is noticeably faster on base M-series chips and 8 GB Macs.
+4. Start WhisperLocal from ~/Applications and grant the permissions it asks for:
+   - **Accessibility** (System Settings → Privacy & Security → Accessibility): the global hotkey and the Cmd+V paste.
+     The hotkey starts working as soon as it is allowed, no restart needed.
+   - **Microphone**: asked on the first dictation.
+5. Hold **Left Control + Left Command**, speak, release.
+
+macOS specifics:
+
+- Config, logs and models live in `~/Library/Application Support/WhisperLocal` ("Show data folder" in the menu),
+  not inside the app. `WhisperLocal.Mac/config.json` is installed there on the first run only; afterwards edit the
+  installed copy ("Open config", hot-reloaded). Delete it to get the project defaults again.
+- Hotkey names: `LeftControl`, `RightControl`, `LeftOption`, `RightOption`, `LeftCommand`, `RightCommand`,
+  `LeftShift`, `RightShift`, `Fn`, `F1`…`F20`; the Windows names (`LControlKey+LWin`, `RMenu`…) map to the
+  Mac keys in the same place. For `Fn`, set System Settings → Keyboard → "Press 🌐 key to" → "Do Nothing".
+- `StartWithWindows` means "start at login" here: a LaunchAgent in `~/Library/LaunchAgents`.
+- The build is signed ad hoc, so every rebuild looks like a new app to macOS and the Accessibility switch
+  stops working: remove WhisperLocal from the list with "–" and add it again. Building with
+  `CODESIGN_IDENTITY="<certificate name>" scripts/build-mac.sh` (e.g. a self-signed code signing certificate
+  from Keychain Access) keeps the permission across rebuilds.
+- Notifications are shown through `osascript`, so they appear as coming from Script Editor.
+- For development, `dotnet run --project WhisperLocal.Mac` works too; macOS then asks for the permissions
+  on behalf of the terminal app.
+
 ## Layout
 
 ```
 WhisperLocal\                       repository
   scripts\get-model.ps1             downloads and verifies a Whisper model
-  WhisperLocal\
+  scripts/build-mac.sh, get-model.sh  macOS: builds WhisperLocal.app / downloads the model
+  WhisperLocal.Core\                platform-neutral: config, pipeline, whisper-server client, filters, LLM, batch
+  WhisperLocal.Mac\                 macOS menu bar app (AppKit/CoreGraphics/AudioToolbox interop), own config.json
+  WhisperLocal\                     Windows tray app
     config.json                     settings (copied to the output on build)
     Runtime\whisper\                whisper-server.exe + DLLs (Vulkan build)
 
@@ -53,7 +97,8 @@ WhisperLocal\WhisperLocal\bin\<Configuration>\net8.0-windows\     next to the ex
   logs\
 ```
 
-Relative paths in the config (`Whisper.ServerExe`, `Whisper.ModelPath`) are relative to the exe directory.
+Relative paths in the config (`Whisper.ServerExe`, `Whisper.ModelPath`) are relative to the exe directory
+(on macOS, `ModelPath` is relative to the data folder).
 
 ## Config
 
@@ -95,6 +140,8 @@ Workflow: look at the `raw:` lines in the log, find the misheard form, add a dic
 ```
 WhisperLocal.exe --batch D:\Dictations [--out results.csv] [--config path\config.json]
 ```
+
+On macOS: `~/Applications/WhisperLocal.app/Contents/MacOS/WhisperLocal --batch ~/Dictations` (files are decoded with `afconvert`).
 
 Runs every wav/mp3/m4a/flac in the folder through the pipeline and writes a CSV (timings, raw,
 dictionary, final text) plus a readable `.txt` next to it.

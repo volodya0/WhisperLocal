@@ -3,3 +3,7 @@ obj/
 .vs/
 *.user
 models/
+artifacts/
+# whisper-server for macOS, built by scripts/build-mac.sh
+WhisperLocal.Mac/Runtime/
+.DS_Store

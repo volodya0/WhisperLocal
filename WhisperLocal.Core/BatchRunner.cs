@@ -2,7 +2,6 @@ using System.Text;
 using WhisperLocal.Audio;
 using WhisperLocal.Config;
 using WhisperLocal.Llm;
-using WhisperLocal.Native;
 using WhisperLocal.Pipeline;
 using WhisperLocal.Stt;
 
@@ -10,15 +9,15 @@ namespace WhisperLocal;
 
 /// <summary>
 /// Evaluation mode: runs a folder of audio files through the pipeline and writes CSV + TXT reports.
-/// Usage: WhisperLocal.exe --batch &lt;folder&gt; [--out &lt;file.csv&gt;] [--config &lt;config.json&gt;]
+/// Usage: WhisperLocal --batch &lt;folder&gt; [--out &lt;file.csv&gt;] [--config &lt;config.json&gt;]
 /// </summary>
 internal static class BatchRunner
 {
     private static readonly string[] Extensions = [".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"];
 
-    public static async Task<int> RunAsync(string[] args)
+    /// <param name="loadFile">Platform audio decoder: file path → 16 kHz mono 16-bit PCM.</param>
+    public static async Task<int> RunAsync(string[] args, Func<string, byte[]> loadFile)
     {
-        NativeMethods.AttachConsole(NativeMethods.ATTACH_PARENT_PROCESS);
         Console.OutputEncoding = Encoding.UTF8;
         Log.EchoToConsole = true;
 
@@ -35,7 +34,7 @@ internal static class BatchRunner
 
         if (folder == null || !Directory.Exists(folder))
         {
-            Console.WriteLine("Usage: WhisperLocal.exe --batch <folder> [--out <file.csv>] [--config <config.json>]");
+            Console.WriteLine("Usage: WhisperLocal --batch <folder> [--out <file.csv>] [--config <config.json>]");
             return 2;
         }
 
@@ -82,7 +81,7 @@ internal static class BatchRunner
             var name = Path.GetFileName(file);
             try
             {
-                var pcm = AudioConvert.LoadFile(file);
+                var pcm = loadFile(file);
                 var r = await pipeline.ProcessAsync(pcm, null, CancellationToken.None);
                 csv.AppendJoin(';', Csv(name), (r.AudioMs / 1000).ToString("F1"), r.SttMs, r.LlmMs, r.TotalMs, r.LlmUsed,
                         Csv(r.Note), Csv(r.RawText), Csv(r.DictionaryText), Csv(r.FinalText))

@@ -1,9 +1,13 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WhisperLocal", "WhisperLocal\WhisperLocal.csproj", "{64CF6735-FDB4-4025-B78A-E6CBB493725D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WhisperLocal.Core", "WhisperLocal.Core\WhisperLocal.Core.csproj", "{8763F55D-14F9-44D4-B678-4138FDFBA4CB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WhisperLocal.Mac", "WhisperLocal.Mac\WhisperLocal.Mac.csproj", "{55181433-7159-486B-A2F6-E3B9541E55D5}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -18,5 +22,13 @@ Global
 		{64CF6735-FDB4-4025-B78A-E6CBB493725D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{64CF6735-FDB4-4025-B78A-E6CBB493725D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{64CF6735-FDB4-4025-B78A-E6CBB493725D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8763F55D-14F9-44D4-B678-4138FDFBA4CB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8763F55D-14F9-44D4-B678-4138FDFBA4CB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8763F55D-14F9-44D4-B678-4138FDFBA4CB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8763F55D-14F9-44D4-B678-4138FDFBA4CB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{55181433-7159-486B-A2F6-E3B9541E55D5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{55181433-7159-486B-A2F6-E3B9541E55D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{55181433-7159-486B-A2F6-E3B9541E55D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{55181433-7159-486B-A2F6-E3B9541E55D5}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

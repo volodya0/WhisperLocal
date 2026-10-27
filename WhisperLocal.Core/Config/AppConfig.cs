@@ -2,7 +2,9 @@ namespace WhisperLocal.Config;
 
 public sealed class AppConfig
 {
-    /// <summary>Start WhisperLocal at Windows logon (HKCU\...\Run entry pointing to the current exe).</summary>
+    /// <summary>
+    /// Start WhisperLocal at logon: HKCU\...\Run entry on Windows, a LaunchAgent on macOS (both point to the current executable).
+    /// </summary>
     public bool StartWithWindows { get; set; } = false;
 
     public HotkeyConfig Hotkey { get; set; } = new();
@@ -42,8 +44,9 @@ public sealed class HotkeyConfig
     /// <summary>
     /// Active hotkey: System.Windows.Forms.Keys names joined with '+', e.g. "RMenu", "LMenu+LWin", "LControlKey+LWin".
     /// Aliases: Alt, Ctrl, Shift, Win (left keys), RightAlt, RightCtrl, RightShift, RightWin.
+    /// macOS: LeftControl, LeftOption, LeftCommand, RightOption, Fn, F13...; the Windows names map to their Mac counterparts.
     /// </summary>
-    public string Key { get; set; } = "LControlKey+LWin";
+    public string Key { get; set; } = OperatingSystem.IsMacOS() ? "LeftControl+LeftCommand" : "LControlKey+LWin";
 
     /// <summary>Presses shorter than this are treated as accidental taps.</summary>
     public int MinHoldMs { get; set; } = 300;
@@ -57,7 +60,7 @@ public sealed class HotkeyConfig
 
 public sealed class AudioConfig
 {
-    /// <summary>Substring of the capture device friendly name; empty = Windows default device.</summary>
+    /// <summary>Substring of the capture device friendly name; empty = the system default device.</summary>
     public string DeviceName { get; set; } = "";
 
     /// <summary>Recording stops automatically after this many seconds (0 = unlimited).</summary>
@@ -66,16 +69,23 @@ public sealed class AudioConfig
 
 public sealed class WhisperConfig
 {
-    /// <summary>Relative paths are relative to the exe directory.</summary>
-    public string ServerExe { get; set; } = @"whisper\whisper-server.exe";
-    public string ModelPath { get; set; } = @"models\ggml-large-v3.bin";
+    /// <summary>
+    /// Relative to the executable's directory. A bare file name ("whisper-server") is also looked up in PATH.
+    /// </summary>
+    public string ServerExe { get; set; } = OperatingSystem.IsWindows() ? @"whisper\whisper-server.exe" : "whisper/whisper-server";
+
+    /// <summary>Relative to the data directory (the exe directory on Windows, ~/Library/Application Support/WhisperLocal on macOS).</summary>
+    public string ModelPath { get; set; } = Path.Combine("models", "ggml-large-v3.bin");
     public string Host { get; set; } = "127.0.0.1";
     public int Port { get; set; } = 8178;
     public string InferencePath { get; set; } = "/inference";
 
     /// <summary>Additional whisper-server command line arguments (threads, beam size, VAD, ...).</summary>
-    /// <remarks>-dev 0 = discrete GPU (device 1 is the integrated Radeon), -sns = suppress non-speech tokens.</remarks>
-    public string ExtraArgs { get; set; } = "-dev 0 -sns -t 8";
+    /// <remarks>
+    /// -dev 0 = discrete GPU (device 1 is the integrated Radeon), -sns = suppress non-speech tokens.
+    /// macOS uses the Metal GPU automatically, there is a single device.
+    /// </remarks>
+    public string ExtraArgs { get; set; } = OperatingSystem.IsMacOS() ? "-sns -t 4" : "-dev 0 -sns -t 8";
 
     public string Language { get; set; } = "uk";
     public double Temperature { get; set; } = 0.0;
@@ -164,7 +174,7 @@ public sealed class LlmConfig
     public string SystemPrompt { get; set; } = DefaultPrompts.System;
     public List<FewShotExample> Examples { get; set; } = DefaultPrompts.Examples();
 
-    /// <summary>Process name (without .exe) → extra instruction appended to the system prompt.</summary>
+    /// <summary>Process name (without .exe; the app name on macOS) → extra instruction appended to the system prompt.</summary>
     public Dictionary<string, string> AppStyles { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
         ["slack"] = "This is a casual chat message: keep it short and informal, no paragraphs unless dictated.",

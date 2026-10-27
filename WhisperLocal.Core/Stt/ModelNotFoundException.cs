@@ -15,7 +15,7 @@ public sealed class ModelNotFoundException(string modelPath) : FileNotFoundExcep
             Download {fileName} (about 3 GB for large-v3) and put it into:
             {Path.GetDirectoryName(modelPath)}
 
-            Either run scripts\get-model.ps1 from the repository,
+            Either run {(OperatingSystem.IsWindows() ? @"scripts\get-model.ps1" : "scripts/get-model.sh")} from the repository,
             or download it manually from:
             {DownloadUrlBase}{fileName}
             """;

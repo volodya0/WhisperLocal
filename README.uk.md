@@ -2,7 +2,7 @@
 
 *English: [README.md](README.md)*
 
-Локальна диктовка для Windows у стилі Wispr Flow: затиснув шорткат, сказав, відпустив — розпізнаний
+Локальна диктовка для Windows і macOS у стилі Wispr Flow: затиснув шорткат, сказав, відпустив — розпізнаний
 текст вставляється в активне вікно. Усе працює локально й портативно на відеокарті (вбудований
 whisper.cpp зі збіркою під Vulkan); нічого не встановлюється й не оновлюється саме.
 
@@ -36,12 +36,56 @@ whisper.cpp зі збіркою під Vulkan); нічого не встанов
 Бінарники whisper.cpp лежать у репозиторії (`WhisperLocal\Runtime\whisper`, опис і контрольні суми у `VERSION.md`).
 Збірка під Vulkan не прив'язана до виробника відеокарти, тож під іншу карту перезбирати нічого не треба.
 
+## macOS
+
+Той самий конвеєр на рідних механізмах macOS: шорткат через CGEventTap → запис через AudioQueue (16 kHz моно)
+→ whisper-server (Metal) → фільтри → буфер обміну + Cmd+V. Програма живе в рядку меню (без іконки в Dock);
+Apple Silicon або Intel, macOS 12+.
+
+1. Встановити [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), Xcode Command Line Tools
+   (`xcode-select --install`) і CMake (`brew install cmake`).
+2. Зібрати whisper-server з Metal і саму програму:
+   ```
+   scripts/build-mac.sh --install        # → artifacts/WhisperLocal.app, копіюється в ~/Applications
+   ```
+   Перший запуск збирає whisper.cpp (зафіксований тег, див. скрипт) у `WhisperLocal.Mac/Runtime/whisper` (не в git).
+   Якщо вже стоїть `brew install whisper-cpp`, можна вказати `"whisper-server"` у `Whisper.ServerExe` — він знайдеться в PATH.
+3. Скачати модель у `~/Library/Application Support/WhisperLocal/models`:
+   ```
+   scripts/get-model.sh
+   ```
+   На базових чипах M-серії і Mac з 8 GB помітно швидша `ggml-large-v3-turbo.bin`.
+4. Запустити WhisperLocal з ~/Applications і дати дозволи, які вона попросить:
+   - **Універсальний доступ** (Системні параметри → Приватність і безпека → Універсальний доступ): глобальний
+     шорткат і вставка через Cmd+V. Шорткат запрацює одразу після дозволу, перезапуск не потрібен.
+   - **Мікрофон**: запит з'явиться при першій диктовці.
+5. Затиснути **лівий Control + лівий Command**, сказати, відпустити.
+
+Особливості macOS:
+
+- Конфіг, логи й моделі лежать у `~/Library/Application Support/WhisperLocal` (пункт меню «Show data folder»),
+  а не всередині програми. `WhisperLocal.Mac/config.json` копіюється туди лише при першому запуску; далі
+  редагується встановлена копія («Open config», перечитується на льоту). Щоб повернути налаштування з проєкту — видалити її.
+- Назви клавіш: `LeftControl`, `RightControl`, `LeftOption`, `RightOption`, `LeftCommand`, `RightCommand`,
+  `LeftShift`, `RightShift`, `Fn`, `F1`…`F20`; віндовські назви (`LControlKey+LWin`, `RMenu`…) відповідають
+  клавішам на тому ж місці. Для `Fn` треба в Системні параметри → Клавіатура → «Натискання клавіші 🌐» вибрати «Нічого не робити».
+- `StartWithWindows` тут означає «запускати при вході»: LaunchAgent у `~/Library/LaunchAgents`.
+- Збірка підписується ad hoc, тож після кожної перезбірки macOS вважає її новою програмою і перемикач
+  Універсального доступу перестає діяти: прибрати WhisperLocal зі списку кнопкою «–» і додати знову. Збірка з
+  `CODESIGN_IDENTITY="<назва сертифіката>" scripts/build-mac.sh` (наприклад, самопідписаний сертифікат для
+  підпису коду з «Доступу до в'язки ключів») зберігає дозвіл між збірками.
+- Сповіщення показуються через `osascript`, тому відправником у них значиться Script Editor.
+- Для розробки підходить і `dotnet run --project WhisperLocal.Mac`; тоді дозволи запитуються для програми терміналу.
+
 ## Структура
 
 ```
 WhisperLocal\                       репозиторій
   scripts\get-model.ps1             скачує й перевіряє модель Whisper
-  WhisperLocal\
+  scripts/build-mac.sh, get-model.sh  macOS: збирає WhisperLocal.app / скачує модель
+  WhisperLocal.Core\                спільне: конфіг, конвеєр, клієнт whisper-server, фільтри, LLM, batch
+  WhisperLocal.Mac\                 програма для рядка меню macOS (AppKit/CoreGraphics/AudioToolbox), свій config.json
+  WhisperLocal\                     програма для трею Windows
     config.json                     налаштування (копіюються в bin при збірці)
     Runtime\whisper\                whisper-server.exe + DLL (Vulkan)
 
@@ -53,7 +97,8 @@ WhisperLocal\WhisperLocal\bin\<Configuration>\net8.0-windows\     поруч з 
   logs\
 ```
 
-Відносні шляхи в конфігу (`Whisper.ServerExe`, `Whisper.ModelPath`) рахуються від папки з exe.
+Відносні шляхи в конфігу (`Whisper.ServerExe`, `Whisper.ModelPath`) рахуються від папки з exe
+(на macOS `ModelPath` — від папки з даними).
 
 ## Конфіг
 
@@ -100,6 +145,8 @@ WhisperLocal.exe --batch D:\Dictations [--out results.csv] [--config path\config
 
 Проганяє всі wav/mp3/m4a/flac з папки через ту саму обробку і пише CSV (час, сирий текст, після словника,
 фінальний) плюс читабельний `.txt` поруч.
+
+На macOS: `~/Applications/WhisperLocal.app/Contents/MacOS/WhisperLocal --batch ~/Dictations` (файли декодуються через `afconvert`).
 
 ## Виміряна швидкість
 
