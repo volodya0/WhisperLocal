@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Documents;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Shapes;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -10,25 +11,30 @@ using WhisperLocal.Pipeline;
 namespace WhisperLocal.Ui;
 
 /// <summary>
-/// The app's window: setup checklist, hotkey selector, model memory, files and recent dictations.
-/// Closing only hides it; it refreshes itself while visible.
+/// The app's window: status header, setup checklist, hotkey selector, model memory, statistics, recent dictations
+/// and files. Dark, card-based. Closing only hides it; it refreshes itself while visible.
 /// </summary>
 public sealed class MainWindow : Window
 {
-    private const int HistoryRows = 10;
+    private const int HistoryRows = 8;
 
     private readonly IAppHost _host;
     private readonly TranscriptWindow _transcript;
-    private readonly StackPanel _setup = new() { Spacing = 6 };
-    private readonly ComboBox _hotkeys = new() { MinWidth = 300 };
-    private readonly Button _record = new() { Content = "Record…" };
-    private readonly TextBlock _hotkeyHint = Hint("");
-    private readonly TextBlock _memory = new() { VerticalAlignment = VerticalAlignment.Center };
-    private readonly Button _memoryButton = new();
-    private readonly Grid _stats = new() { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,Auto,Auto") };
-    private readonly TextBlock _statsSince = Hint("");
-    private readonly Grid _history = new() { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,Auto,Auto,Auto,*,Auto") };
-    private readonly TextBlock _historySummary = Hint("");
+
+    private readonly Ellipse _statusDot = DarkTheme.Dot(DarkTheme.Idle);
+    private readonly TextBlock _status = DarkTheme.MutedLabel("", 13);
+    private readonly StackPanel _setup = new() { Spacing = 4 };
+    private readonly ComboBox _hotkeys = new() { MinWidth = 300, FontSize = 13 };
+    private readonly Button _record;
+    private readonly TextBlock _hotkeyHint = DarkTheme.MutedLabel("");
+    private readonly Ellipse _memoryDot = DarkTheme.Dot(DarkTheme.Idle);
+    private readonly TextBlock _memory = DarkTheme.Label("");
+    private readonly TextBlock _memoryDetail = DarkTheme.MutedLabel("");
+    private readonly Button _memoryButton;
+    private readonly Grid _statTiles = new() { ColumnDefinitions = new ColumnDefinitions("*,*,*,*") };
+    private readonly TextBlock _statsNote = DarkTheme.MutedLabel("");
+    private readonly StackPanel _history = new();
+    private readonly TextBlock _historyNote = DarkTheme.MutedLabel("");
     private readonly DispatcherTimer _refresh = new() { Interval = TimeSpan.FromSeconds(1.5) };
 
     private List<HotkeyPreset> _hotkeyChoices = [];
@@ -37,6 +43,7 @@ public sealed class MainWindow : Window
     private bool _updatingHotkeys;
     private bool _recording;
     private bool _historyDirty = true;
+    private int _statsPeriod; // 0 today, 1 last 7 days, 2 all time
     private bool _allowClose;
 
     public MainWindow(IAppHost host, TranscriptWindow transcript)
@@ -46,34 +53,40 @@ public sealed class MainWindow : Window
         Title = "WhisperLocal";
         Width = 720;
         Height = 760;
-        MinWidth = 560;
-        MinHeight = 500;
+        MinWidth = 600;
+        MinHeight = 520;
+        Background = DarkTheme.Background;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
+
+        _record = DarkTheme.Button("Record…", ToggleHotkeyRecording);
+        _memoryButton = DarkTheme.Button("", () => _ = ToggleMemoryAsync(), small: true);
+        _memoryButton.MinWidth = 72;
 
         Content = new ScrollViewer
         {
             Content = new StackPanel
             {
-                Margin = new Thickness(24, 18, 24, 24),
+                Margin = new Thickness(18, 14, 18, 18),
                 Spacing = 10,
                 Children =
                 {
                     Header(),
-                    Section("Setup"), _setup,
-                    Section("Hotkey"), HotkeySection(),
-                    Section("Speech model"), MemorySection(),
-                    Section("Files"), FilesSection(),
-                    Section("Statistics"), _stats, _statsSince,
-                    Section("Recent dictations"), _history, _historySummary,
-                    Hint("WhisperLocal lives in the menu bar (tray on Windows). If you cannot see its icon, it may be hidden " +
-                         "behind the notch or switched off in System Settings → Menu Bar. Open WhisperLocal again to get back here."),
+                    DarkTheme.Section("Setup", _setup),
+                    DarkTheme.Section("Hotkey", HotkeySection()),
+                    DarkTheme.Section("Speech model", MemorySection()),
+                    DarkTheme.Section("Statistics", StatsSection(),
+                        DarkTheme.Segmented(["Today", "7 days", "All time"], _statsPeriod, i =>
+                        {
+                            _statsPeriod = i;
+                            RefreshStats();
+                        })),
+                    DarkTheme.Section("Recent dictations", new StackPanel { Spacing = 4, Children = { _history, _historyNote } }),
+                    DarkTheme.Section("Files", FilesSection()),
                 },
             },
         };
 
         _hotkeys.SelectionChanged += (_, _) => OnHotkeySelected();
-        _record.Click += (_, _) => ToggleHotkeyRecording();
-        _memoryButton.Click += async (_, _) => await ToggleMemoryAsync();
         _refresh.Tick += (_, _) => Refresh();
         _host.History.Changed += () => Dispatcher.UIThread.Post(() =>
         {
@@ -102,13 +115,16 @@ public sealed class MainWindow : Window
             {
                 _refresh.Stop();
                 if (_recording)
+                {
+                    _host.CancelHotkeyRecording();
                     StopHotkeyRecording();
+                }
             }
             _host.MainWindowVisibilityChanged(IsVisible);
         };
     }
 
-    /// <summary>True if the setup checklist has anything that is not OK.</summary>
+    /// <summary>True if the setup checklist has anything that blocks dictation.</summary>
     public bool HasProblems => _host.GetSetupItems().Any(i => i.State is SetupState.Error);
 
     public void ShowAndActivate()
@@ -127,26 +143,60 @@ public sealed class MainWindow : Window
             RefreshHistory();
     }
 
+    // ---- Header ----
+
     private Control Header()
     {
-        var update = new Button { Content = "Check for Updates…", VerticalAlignment = VerticalAlignment.Center };
-        update.Click += (_, _) => _host.CheckForUpdates();
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
-        grid.Children.Add(new TextBlock { Text = "WhisperLocal", FontSize = 22, FontWeight = FontWeight.Bold });
-        var version = Hint($"Version {_host.VersionText}");
-        version.VerticalAlignment = VerticalAlignment.Center;
-        version.Margin = new Thickness(0, 0, 12, 0);
-        Grid.SetColumn(version, 1);
-        Grid.SetColumn(update, 2);
-        grid.Children.Add(version);
-        grid.Children.Add(update);
+        var titles = new StackPanel
+        {
+            Spacing = 1,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                DarkTheme.Label("WhisperLocal", 19, FontWeight.SemiBold),
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _statusDot, _status } },
+            },
+        };
+        var right = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                DarkTheme.Label($"v{_host.VersionText}", 12, brush: DarkTheme.Subtle),
+                DarkTheme.Button("Check for Updates", _host.CheckForUpdates, small: true),
+            },
+        };
+
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(0, 0, 0, 2) };
+        var icon = DarkTheme.AppIcon(38);
+        icon.Margin = new Thickness(0, 0, 12, 0);
+        grid.Children.Add(icon);
+        Grid.SetColumn(titles, 1);
+        grid.Children.Add(titles);
+        Grid.SetColumn(right, 2);
+        grid.Children.Add(right);
         return grid;
     }
 
+    // ---- Setup ----
+
     private void RefreshSetup()
     {
-        // Rebuild only on change: replacing a button under the mouse would swallow the click
         var items = _host.GetSetupItems();
+
+        var problems = items.Count(i => i.State is SetupState.Error or SetupState.Warning);
+        var hotkey = _host.DescribeHotkey(_host.Config.Current.Hotkey.Key);
+        (_statusDot.Fill, _status.Text) = problems switch
+        {
+            0 when items.Any(i => i.State == SetupState.Pending) => (DarkTheme.Accent, "Almost ready…"),
+            0 => (DarkTheme.Ok, $"Ready · hold {hotkey} to dictate"),
+            1 => (DarkTheme.Warning, "1 thing needs attention"),
+            _ => (DarkTheme.Warning, $"{problems} things need attention"),
+        };
+
+        // Rebuild only on change: replacing a button under the mouse would swallow the click
         var signature = string.Join("\n", items.Select(i => $"{i.State}|{i.Text}|{i.ActionLabel}"));
         if (signature == _shownSetup)
             return;
@@ -155,37 +205,35 @@ public sealed class MainWindow : Window
         _setup.Children.Clear();
         foreach (var item in items)
         {
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("28,*,Auto"), MinHeight = 30 };
-            row.Children.Add(new TextBlock
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("20,*,Auto"), MinHeight = 26 };
+            row.Children.Add(DarkTheme.Dot(item.State switch
             {
-                Text = item.State switch
-                {
-                    SetupState.Ok => "✅",
-                    SetupState.Warning => "⚠️",
-                    SetupState.Pending => "⏳",
-                    _ => "❌",
-                },
-                VerticalAlignment = VerticalAlignment.Center,
-            });
-            var text = new TextBlock { Text = item.Text, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+                SetupState.Ok => DarkTheme.Ok,
+                SetupState.Warning => DarkTheme.Warning,
+                SetupState.Pending => DarkTheme.Accent,
+                _ => DarkTheme.Error,
+            }));
+            var text = DarkTheme.Label(item.Text, brush: item.State == SetupState.Ok ? DarkTheme.Text : DarkTheme.Text);
             Grid.SetColumn(text, 1);
             row.Children.Add(text);
             if (item.ActionLabel != null && item.Action != null)
             {
-                var button = new Button { Content = item.ActionLabel, MinWidth = 130, HorizontalContentAlignment = HorizontalAlignment.Center };
                 var action = item.Action;
-                button.Click += (_, _) =>
+                var button = DarkTheme.Button(item.ActionLabel, () =>
                 {
                     action();
                     _shownSetup = null;
                     Refresh();
-                };
+                }, accent: item.State == SetupState.Error, small: true);
+                button.Margin = new Thickness(12, 0, 0, 0);
                 Grid.SetColumn(button, 2);
                 row.Children.Add(button);
             }
             _setup.Children.Add(row);
         }
     }
+
+    // ---- Hotkey ----
 
     private Control HotkeySection()
     {
@@ -212,7 +260,7 @@ public sealed class MainWindow : Window
         _hotkeys.ItemsSource = _hotkeyChoices.Select(p => p.Title).ToList();
         _hotkeys.SelectedIndex = index;
         _updatingHotkeys = false;
-        _hotkeyHint.Text = $"Hold {_host.DescribeHotkey(current)}, speak, release. \"Record…\" takes any combination you hold.";
+        SetHotkeyHint("Hold to record, release to transcribe. Record… takes any combination you hold.");
     }
 
     private bool SameHotkey(string a, string b) =>
@@ -235,7 +283,7 @@ public sealed class MainWindow : Window
         }
 
         var error = _host.StartHotkeyRecording(
-            preview => Dispatcher.UIThread.Post(() => _hotkeyHint.Text = $"Recording: {preview} … release to save"),
+            preview => Dispatcher.UIThread.Post(() => SetHotkeyHint($"{preview} … release to save", DarkTheme.Accent)),
             key => Dispatcher.UIThread.Post(() =>
             {
                 StopHotkeyRecording();
@@ -244,12 +292,12 @@ public sealed class MainWindow : Window
             }));
         if (error != null)
         {
-            _hotkeyHint.Text = error;
+            SetHotkeyHint(error, DarkTheme.Warning);
             return;
         }
         _recording = true;
         _record.Content = "Cancel";
-        _hotkeyHint.Text = "Hold the keys you want to use, then release them. Esc cancels.";
+        SetHotkeyHint("Listening… hold the keys you want, then release. Esc cancels.", DarkTheme.Accent);
     }
 
     private void StopHotkeyRecording()
@@ -265,22 +313,31 @@ public sealed class MainWindow : Window
         try
         {
             ConfigEditor.SetValue(_host.Config.FilePath, "Hotkey", "Key", key);
-            _hotkeyHint.Text = $"Saved: hold {_host.DescribeHotkey(key)} to dictate.";
+            SetHotkeyHint($"Saved. Hold {_host.DescribeHotkey(key)} to dictate.", DarkTheme.Ok);
         }
         catch (Exception ex)
         {
             Log.Error("Saving the hotkey failed", ex);
-            _hotkeyHint.Text = $"Could not save the hotkey: {ex.Message}";
+            SetHotkeyHint($"Could not save the hotkey: {ex.Message}", DarkTheme.Error);
         }
     }
 
+    private void SetHotkeyHint(string text, IBrush? brush = null)
+    {
+        _hotkeyHint.Text = text;
+        _hotkeyHint.Foreground = brush ?? DarkTheme.Muted;
+    }
+
+    // ---- Speech model ----
+
     private Control MemorySection()
     {
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-        grid.Children.Add(_memory);
-        Grid.SetColumn(_memoryButton, 1);
-        _memoryButton.MinWidth = 130;
-        _memoryButton.HorizontalContentAlignment = HorizontalAlignment.Center;
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("20,*,Auto") };
+        grid.Children.Add(_memoryDot);
+        var texts = new StackPanel { Spacing = 2, Children = { _memory, _memoryDetail } };
+        Grid.SetColumn(texts, 1);
+        grid.Children.Add(texts);
+        Grid.SetColumn(_memoryButton, 2);
         grid.Children.Add(_memoryButton);
         return grid;
     }
@@ -288,7 +345,9 @@ public sealed class MainWindow : Window
     private void RefreshMemory()
     {
         var (loaded, detail) = _host.GetModelMemory();
-        _memory.Text = (loaded ? "🟢  Loaded in memory: " : "⚪️  Not loaded: ") + detail;
+        _memoryDot.Fill = loaded ? DarkTheme.Ok : DarkTheme.Idle;
+        _memory.Text = loaded ? "Loaded in memory" : "Not loaded";
+        _memoryDetail.Text = detail;
         _memoryButton.Content = loaded ? "Unload" : "Load";
     }
 
@@ -301,7 +360,8 @@ public sealed class MainWindow : Window
                 await _host.UnloadAsync();
             else
             {
-                _memory.Text = "⏳  Loading the model…";
+                _memoryDot.Fill = DarkTheme.Accent;
+                _memory.Text = "Loading…";
                 await _host.LoadAsync();
             }
         }
@@ -316,52 +376,144 @@ public sealed class MainWindow : Window
         }
     }
 
-    private Control FilesSection()
-    {
-        var config = _host.Config.FilePath;
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            Children =
-            {
-                FileButton("Open Config", () => _host.OpenPath(config, textEditor: true)),
-                FileButton("Open Log", () => _host.OpenPath(Log.CurrentFile, textEditor: true)),
-                FileButton("Logs Folder", () => _host.OpenPath(AppPaths.LogDir)),
-                FileButton("Data Folder", () => _host.OpenPath(AppPaths.DataDir)),
-            },
-        };
-        var path = new SelectableTextBlock { Text = AppPaths.DataDir, Foreground = Brushes.Gray, FontSize = 12 };
-        return new StackPanel { Spacing = 6, Children = { buttons, path } };
-    }
+    // ---- Statistics ----
 
-    private static Button FileButton(string title, Action open)
-    {
-        var button = new Button { Content = title };
-        button.Click += (_, _) => open();
-        return button;
-    }
+    private Control StatsSection() => new StackPanel { Spacing = 8, Children = { _statTiles, _statsNote } };
 
     private void RefreshStats()
     {
-        _stats.Children.Clear();
-        _stats.RowDefinitions.Clear();
+        var totals = _statsPeriod switch
+        {
+            0 => _host.Stats.Today(),
+            1 => _host.Stats.LastDays(7),
+            _ => _host.Stats.AllTime(),
+        };
 
-        var periods = new[] { ("Today", _host.Stats.Today()), ("Last 7 days", _host.Stats.LastDays(7)), ("All time", _host.Stats.AllTime()) };
-        AddRow(_stats, 0, [Cell(""), .. periods.Select(p => (Control)new TextBlock { Text = p.Item1, FontWeight = FontWeight.SemiBold })]);
-        AddRow(_stats, 1, [Cell("Dictations"), .. periods.Select(p => (Control)Cell(p.Item2.Dictations.ToString("N0")))]);
-        AddRow(_stats, 2, [Cell("Words"), .. periods.Select(p => (Control)Cell(p.Item2.Words.ToString("N0")))]);
-        AddRow(_stats, 3, [Cell("Speaking time"), .. periods.Select(p => (Control)Cell(FormatDuration(p.Item2.SpeakingSec)))]);
-        AddRow(_stats, 4, [Cell("Speaking rate"), .. periods.Select(p => (Control)Cell(
-            p.Item2.SpeakingSec > 0 ? $"{p.Item2.WordsPerMinute:F0} words/min" : "–"))]);
+        _statTiles.Children.Clear();
+        (string Value, string Label)[] tiles =
+        [
+            (totals.Dictations.ToString("N0"), "dictations"),
+            (totals.Words.ToString("N0"), "words"),
+            (FormatDuration(totals.SpeakingSec), "speaking"),
+            (totals.SpeakingSec > 0 ? totals.WordsPerMinute.ToString("F0") : "–", "words / min"),
+        ];
+        for (var i = 0; i < tiles.Length; i++)
+        {
+            var tile = new StackPanel
+            {
+                Spacing = 0,
+                Children =
+                {
+                    DarkTheme.Label(tiles[i].Value, 20, FontWeight.SemiBold),
+                    DarkTheme.MutedLabel(tiles[i].Label),
+                },
+            };
+            Grid.SetColumn(tile, i);
+            _statTiles.Children.Add(tile);
+        }
 
-        var all = periods[2].Item2;
-        // Typing at ~40 words/min is a common average; speaking is usually several times faster
-        var typingSec = all.Words / 40.0 * 60;
-        var saved = typingSec - all.SpeakingSec - all.ProcessingSec;
-        _statsSince.Text = $"Counting since {_host.Stats.Since.ToLocalTime():d}." +
-                           (saved > 60 ? $" Compared with typing at 40 words/min, about {FormatDuration(saved)} saved." : "");
+        var all = _host.Stats.AllTime();
+        // Typing at ~40 words/min is a common average
+        var saved = all.Words / 40.0 * 60 - all.SpeakingSec - all.ProcessingSec;
+        _statsNote.Text = $"Counting since {_host.Stats.Since.ToLocalTime():d}" +
+                          (saved > 60 ? $" · about {FormatDuration(saved)} saved compared with typing at 40 words/min" : "");
     }
+
+    // ---- Recent dictations ----
+
+    private void RefreshHistory()
+    {
+        _historyDirty = false;
+        RefreshStats();
+        _history.Children.Clear();
+
+        var records = _host.History.Recent(HistoryRows);
+        if (records.Count == 0)
+        {
+            _historyNote.Text = "Nothing yet. Hold the hotkey anywhere, speak, release.";
+            return;
+        }
+
+        for (var i = 0; i < records.Count; i++)
+        {
+            if (i > 0)
+                _history.Children.Add(DarkTheme.Separator());
+            _history.Children.Add(HistoryRow(records[i]));
+        }
+
+        var spoken = records.Where(r => r.Words > 0).ToList();
+        if (spoken.Count == 0)
+        {
+            _historyNote.Text = "";
+            return;
+        }
+        var avgStt = spoken.Average(r => r.SttSec);
+        var speed = avgStt > 0 ? spoken.Average(r => r.RecordSec) / avgStt : 0;
+        _historyNote.Text = $"Average of the last {spoken.Count}: processing {spoken.Average(r => r.ProcessSec):F1} s, " +
+                            $"recognition {avgStt:F1} s ({speed:F0}× real time)";
+        _historyNote.Margin = new Thickness(0, 4, 0, 0);
+    }
+
+    private Control HistoryRow(DictationRecord r)
+    {
+        var hasText = !string.IsNullOrEmpty(r.Text);
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("54,*,Auto,Auto") };
+
+        row.Children.Add(DarkTheme.Label(r.Time.ToLocalTime().ToString("HH:mm"), 12, brush: DarkTheme.Subtle));
+
+        var text = new TextBlock
+        {
+            Text = hasText ? r.Text : (r.Words > 0 ? $"{r.Words} words (text not kept)" : NoteText(r.Note)),
+            FontSize = 13,
+            Foreground = hasText ? DarkTheme.Text : DarkTheme.Muted,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        if (hasText)
+            ToolTip.SetTip(text, string.IsNullOrEmpty(r.App) ? r.Text : $"{r.App}: {r.Text}");
+        Grid.SetColumn(text, 1);
+        row.Children.Add(text);
+
+        var meta = DarkTheme.Label($"{r.RecordSec:F1} s · {r.ProcessSec:F1} s · {r.Words} w", 12, brush: DarkTheme.Subtle);
+        meta.Margin = new Thickness(14, 0, 8, 0);
+        ToolTip.SetTip(meta, $"Recording {r.RecordSec:F1} s, processing {r.ProcessSec:F1} s (recognition {r.SttSec:F1} s), {r.Words} words");
+        Grid.SetColumn(meta, 2);
+        row.Children.Add(meta);
+
+        if (hasText)
+        {
+            var full = r.Text;
+            var show = DarkTheme.Button("Show", () => _transcript.ShowText(full), small: true);
+            Grid.SetColumn(show, 3);
+            row.Children.Add(show);
+        }
+        return row;
+    }
+
+    private static string NoteText(string note) => string.IsNullOrEmpty(note) ? "No speech" : char.ToUpper(note[0]) + note[1..];
+
+    // ---- Files ----
+
+    private Control FilesSection()
+    {
+        var config = _host.Config.FilePath;
+        var buttons = new WrapPanel
+        {
+            Children =
+            {
+                DarkTheme.Button("Config", () => _host.OpenPath(config, textEditor: true), small: true),
+                DarkTheme.Button("Log", () => _host.OpenPath(Log.CurrentFile, textEditor: true), small: true),
+                DarkTheme.Button("Logs folder", () => _host.OpenPath(AppPaths.LogDir), small: true),
+                DarkTheme.Button("Data folder", () => _host.OpenPath(AppPaths.DataDir), small: true),
+            },
+        };
+        foreach (var child in buttons.Children)
+            child.Margin = new Thickness(0, 0, 8, 0);
+        var path = new SelectableTextBlock { Text = AppPaths.DataDir, Foreground = DarkTheme.Subtle, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
+        return new StackPanel { Spacing = 6, Children = { buttons, path } };
+    }
+
+    // ---- Helpers ----
 
     private static string FormatDuration(double seconds)
     {
@@ -372,93 +524,6 @@ public sealed class MainWindow : Window
             return $"{t.Minutes} min {t.Seconds} s";
         return $"{t.Seconds} s";
     }
-
-    private void RefreshHistory()
-    {
-        _historyDirty = false;
-        RefreshStats();
-        _history.Children.Clear();
-        _history.RowDefinitions.Clear();
-
-        var records = _host.History.Recent(HistoryRows);
-        if (records.Count == 0)
-        {
-            _historySummary.Text = "No dictations yet.";
-            return;
-        }
-
-        string[] headers = ["Time", "Recording", "Processing", "Recognition", "Words", "Text", ""];
-        AddRow(_history, 0, headers.Select(h => (Control)new TextBlock { Text = h, FontWeight = FontWeight.SemiBold }).ToArray());
-        for (var i = 0; i < records.Count; i++)
-        {
-            var r = records[i];
-            var text = new TextBlock
-            {
-                Text = string.IsNullOrEmpty(r.Text) ? r.Note : r.Text,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Foreground = string.IsNullOrEmpty(r.Text) ? Brushes.Gray : null,
-            };
-            ToolTip.SetTip(text, string.IsNullOrEmpty(r.App) ? r.Text : $"{r.App}: {r.Text}");
-
-            Control show = new TextBlock();
-            if (!string.IsNullOrEmpty(r.Text))
-            {
-                var button = new Button { Content = "Show", Padding = new Thickness(8, 1) };
-                var full = r.Text;
-                button.Click += (_, _) => _transcript.ShowText(full);
-                show = button;
-            }
-
-            AddRow(_history, i + 1,
-            [
-                Cell(r.Time.ToLocalTime().ToString("HH:mm")),
-                Cell($"{r.RecordSec:F1} s"),
-                Cell($"{r.ProcessSec:F1} s"),
-                Cell($"{r.SttSec:F1} s"),
-                Cell(r.Words.ToString()),
-                text,
-                show,
-            ]);
-        }
-
-        var spoken = records.Where(r => r.Words > 0).ToList();
-        if (spoken.Count == 0)
-        {
-            _historySummary.Text = "";
-            return;
-        }
-        var avgRecord = spoken.Average(r => r.RecordSec);
-        var avgProcess = spoken.Average(r => r.ProcessSec);
-        var avgStt = spoken.Average(r => r.SttSec);
-        var speed = avgStt > 0 ? avgRecord / avgStt : 0;
-        _historySummary.Inlines =
-        [
-            new Run($"Average of the last {spoken.Count}: recording {avgRecord:F1} s, processing {avgProcess:F1} s " +
-                    $"(recognition {avgStt:F1} s, {speed:F0}× faster than real time), {spoken.Average(r => r.Words):F0} words."),
-        ];
-    }
-
-    private static void AddRow(Grid grid, int row, Control[] cells)
-    {
-        grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-        for (var column = 0; column < cells.Length; column++)
-        {
-            var cell = cells[column];
-            cell.Margin = new Thickness(0, 3, 14, 3);
-            cell.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetRow(cell, row);
-            Grid.SetColumn(cell, column);
-            grid.Children.Add(cell);
-        }
-    }
-
-    private static TextBlock Cell(string text) => new() { Text = text };
-
-    private static TextBlock Section(string title) =>
-        new() { Text = title, FontSize = 15, FontWeight = FontWeight.Bold, Margin = new Thickness(0, 12, 0, 2) };
-
-    private static TextBlock Hint(string text) =>
-        new() { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Gray, FontSize = 12 };
 
     public void CloseForGood()
     {

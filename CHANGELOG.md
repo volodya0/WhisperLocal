@@ -10,6 +10,9 @@
 - Shared cross-platform windows (`WhisperLocal.Ui`, Avalonia): main window with setup checklist, hotkey selector
   (presets and recording), model memory with Unload/Load, file buttons and recent dictations with timing statistics;
   transcript window with Copy. Used by the macOS app; the Windows app can adopt it next.
+- macOS hotkeys can include character keys (e.g. Option + /); that key is swallowed while the combination is held.
+- Dark redesign of the shared windows (cards, status dots, statistics tiles); the success summary on the indicator
+  stays 6 s (`Ui.ResultSeconds`); the history keeps the last 20 dictations.
 - Lifetime statistics (today / 7 days / all time): dictations, words, speaking time, words per minute.
 - macOS indicator: live seconds while recording/processing, then a summary (times, words) with a Text button.
 - macOS setup window: permission, server and model status with fix-it buttons and an in-app model download.

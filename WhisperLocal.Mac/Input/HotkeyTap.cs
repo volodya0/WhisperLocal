@@ -27,7 +27,15 @@ internal sealed unsafe class HotkeyTap : IDisposable
         ["F9"] = 101, ["F10"] = 109, ["F11"] = 103, ["F12"] = 111, ["F13"] = 105, ["F14"] = 107, ["F15"] = 113,
         ["F16"] = 106, ["F17"] = 64, ["F18"] = 79, ["F19"] = 80, ["F20"] = 90,
         ["Escape"] = 53, ["Space"] = 49, ["Tab"] = 48, ["Return"] = 36,
-        ["Home"] = 115, ["End"] = 119, ["PageUp"] = 116, ["PageDown"] = 121, ["ForwardDelete"] = 117,
+        ["Home"] = 115, ["End"] = 119, ["PageUp"] = 116, ["PageDown"] = 121, ["ForwardDelete"] = 117, ["Delete"] = 51,
+        ["Left"] = 123, ["Right"] = 124, ["Down"] = 125, ["Up"] = 126,
+        // Character keys by position (ANSI layout names; the same physical key on other layouts)
+        ["A"] = 0, ["S"] = 1, ["D"] = 2, ["F"] = 3, ["H"] = 4, ["G"] = 5, ["Z"] = 6, ["X"] = 7, ["C"] = 8, ["V"] = 9,
+        ["B"] = 11, ["Q"] = 12, ["W"] = 13, ["E"] = 14, ["R"] = 15, ["Y"] = 16, ["T"] = 17, ["O"] = 31, ["U"] = 32,
+        ["I"] = 34, ["P"] = 35, ["L"] = 37, ["J"] = 38, ["K"] = 40, ["N"] = 45, ["M"] = 46,
+        ["1"] = 18, ["2"] = 19, ["3"] = 20, ["4"] = 21, ["5"] = 23, ["6"] = 22, ["7"] = 26, ["8"] = 28, ["9"] = 25, ["0"] = 29,
+        ["Minus"] = 27, ["Equal"] = 24, ["LeftBracket"] = 33, ["RightBracket"] = 30, ["Backslash"] = 42,
+        ["Semicolon"] = 41, ["Quote"] = 39, ["Comma"] = 43, ["Period"] = 47, ["Slash"] = 44, ["Grave"] = 50,
     };
 
     // Short and Windows names, so the same config works on both systems
@@ -41,6 +49,12 @@ internal sealed unsafe class HotkeyTap : IDisposable
         ["RightWin"] = "RightCommand", ["LWin"] = "LeftCommand", ["RWin"] = "RightCommand",
         ["Shift"] = "LeftShift", ["LShiftKey"] = "LeftShift", ["RShiftKey"] = "RightShift",
         ["Globe"] = "Fn", ["Function"] = "Fn",
+        ["D0"] = "0", ["D1"] = "1", ["D2"] = "2", ["D3"] = "3", ["D4"] = "4", ["D5"] = "5", ["D6"] = "6", ["D7"] = "7", ["D8"] = "8", ["D9"] = "9",
+        ["OemQuestion"] = "Slash", ["Oemcomma"] = "Comma", ["OemPeriod"] = "Period", ["OemMinus"] = "Minus", ["Oemplus"] = "Equal",
+        ["OemSemicolon"] = "Semicolon", ["OemQuotes"] = "Quote", ["OemOpenBrackets"] = "LeftBracket", ["OemCloseBrackets"] = "RightBracket",
+        ["OemPipe"] = "Backslash", ["Oemtilde"] = "Grave", ["Back"] = "Delete", ["Enter"] = "Return",
+        ["/"] = "Slash", [","] = "Comma", ["."] = "Period", [";"] = "Semicolon", ["'"] = "Quote", ["`"] = "Grave",
+        ["-"] = "Minus", ["="] = "Equal", ["["] = "LeftBracket", ["]"] = "RightBracket", ["\\"] = "Backslash",
     };
 
     private static readonly Dictionary<ushort, string> DisplayNames = new()
@@ -50,6 +64,9 @@ internal sealed unsafe class HotkeyTap : IDisposable
         [55] = "Left Command", [54] = "Right Command",
         [56] = "Left Shift", [60] = "Right Shift",
         [63] = "Fn",
+        [44] = "/", [43] = ",", [47] = ".", [41] = ";", [39] = "'", [50] = "`", [27] = "-", [24] = "=",
+        [33] = "[", [30] = "]", [42] = "\\", [49] = "Space", [51] = "Delete", [117] = "Forward Delete",
+        [123] = "←", [124] = "→", [125] = "↓", [126] = "↑",
     };
 
     // Device-dependent modifier bits (IOKit NX_DEVICE*KEYMASK) tell left and right keys apart
@@ -165,11 +182,15 @@ internal sealed unsafe class HotkeyTap : IDisposable
             _context.Post(_ => done(keys), null);
     }
 
-    /// <summary>Config form ("LeftControl+LeftCommand"), modifiers first.</summary>
+    // Order of modifiers in the config form, as macOS menus show them: ⌃ ⌥ ⇧ ⌘, then Fn
+    private static readonly ushort[] ModifierOrder = [59, 62, 58, 61, 56, 60, 55, 54, 63];
+
+    /// <summary>Config form ("LeftControl+LeftCommand"): modifiers in a fixed order, then the other keys as pressed.</summary>
     public static string ToConfigString(IEnumerable<ushort> keys) =>
         string.Join("+", keys
-            .OrderBy(k => ModifierMasks.ContainsKey(k) ? 0 : 1)
-            .Select(k => KeyCodes.First(e => e.Value == k).Key));
+            .Select((k, i) => (Key: k, Rank: Array.IndexOf(ModifierOrder, k) is var m and >= 0 ? m : ModifierOrder.Length + i))
+            .OrderBy(e => e.Rank)
+            .Select(e => KeyCodes.First(c => c.Value == e.Key).Key));
 
     /// <summary>Parses "RightOption", "LeftControl+LeftCommand", "Ctrl+Cmd", "LControlKey+LWin" etc. into key codes.</summary>
     public static ushort[] ParseHotkey(string text)
@@ -259,12 +280,16 @@ internal sealed unsafe class HotkeyTap : IDisposable
 
         if (Array.IndexOf(_keys, code) >= 0)
         {
-            // Swallowing a modifier (or any key of a combo) would break other shortcuts like Cmd+Tab,
-            // so only a single non-modifier key is suppressed
-            var suppress = SuppressKey && _keys.Length == 1 && !ModifierMasks.ContainsKey(code);
+            var wasActive = _active;
+            var activating = isDown && !_active && OtherKeysHeld(code, flags);
+
+            // The non-modifier key of the hotkey (F13, or "/" in Option+/) is swallowed while the hotkey is in use,
+            // so it does not type into the app (Option+/ would insert "÷"); on its own it keeps working normally.
+            // Modifiers are never swallowed: that would break other shortcuts like Cmd+Tab.
+            var suppress = SuppressKey && !ModifierMasks.ContainsKey(code) && (activating || wasActive);
 
             // Auto-repeat re-sends key-down while held; _active filters it out
-            if (isDown && !_active && OtherKeysHeld(code, flags))
+            if (activating)
             {
                 _active = true;
                 _context.Post(_ => HotkeyDown?.Invoke(), null);

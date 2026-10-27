@@ -10,41 +10,45 @@ namespace WhisperLocal.Ui;
 public sealed class TranscriptWindow : Window
 {
     private readonly TextBox _text;
+    private readonly TextBlock _words = DarkTheme.MutedLabel("");
     private readonly Button _copy;
     private bool _allowClose;
 
     public TranscriptWindow()
     {
         Title = "Transcript";
-        Width = 480;
-        Height = 230;
-        MinWidth = 300;
-        MinHeight = 140;
+        Width = 520;
+        Height = 260;
+        MinWidth = 320;
+        MinHeight = 160;
         Topmost = true;
         ShowInTaskbar = false;
+        Background = DarkTheme.Background;
         WindowStartupLocation = WindowStartupLocation.Manual;
 
         _text = new TextBox
         {
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            FontSize = 14,
+            FontSize = 15,
+            Padding = new Thickness(12, 10),
+            Background = DarkTheme.Card,
+            BorderBrush = DarkTheme.CardBorder,
+            CornerRadius = new CornerRadius(10),
         };
-        _copy = new Button { Content = "Copy", MinWidth = 90, HorizontalContentAlignment = HorizontalAlignment.Center };
-        _copy.Click += async (_, _) => await CopyAsync();
-        var close = new Button { Content = "Close", MinWidth = 90, HorizontalContentAlignment = HorizontalAlignment.Center };
-        close.Click += (_, _) => Hide();
+        _text.TextChanged += (_, _) => UpdateWordCount();
+        _copy = DarkTheme.Button("Copy", () => _ = CopyAsync(), accent: true);
+        var close = DarkTheme.Button("Close", Hide);
 
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Spacing = 8,
-            Margin = new Thickness(0, 10, 0, 0),
-            Children = { close, _copy },
-        };
-        DockPanel.SetDock(buttons, Dock.Bottom);
-        Content = new DockPanel { Margin = new Thickness(14), Children = { buttons, _text } };
+        var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), Margin = new Thickness(0, 10, 0, 0) };
+        footer.Children.Add(_words);
+        close.Margin = new Thickness(0, 0, 8, 0);
+        Grid.SetColumn(close, 1);
+        footer.Children.Add(close);
+        Grid.SetColumn(_copy, 2);
+        footer.Children.Add(_copy);
+        DockPanel.SetDock(footer, Dock.Bottom);
+        Content = new DockPanel { Margin = new Thickness(12), Children = { footer, _text } };
 
         // Reused: closing only hides it
         Closing += (_, e) =>
@@ -63,6 +67,12 @@ public sealed class TranscriptWindow : Window
         PlaceAboveIndicator();
         Show();
         Activate();
+    }
+
+    private void UpdateWordCount()
+    {
+        var count = (_text.Text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        _words.Text = count == 1 ? "1 word" : $"{count} words";
     }
 
     /// <summary>Bottom centre of the primary screen, above the indicator (which sits 40 pt above the bottom).</summary>

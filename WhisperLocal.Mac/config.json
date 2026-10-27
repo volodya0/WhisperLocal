@@ -134,7 +134,9 @@
     "RestoreDelayMs": 400
   },
   "Ui": {
-    "ShowOverlay": true
+    "ShowOverlay": true,
+    // Seconds the indicator keeps a successful dictation's summary (longer while the mouse is over it)
+    "ResultSeconds": 6
   },
   "Logging": {
     "LogText": true,

@@ -72,10 +72,10 @@ from Applications again):
 - statistics for today, the last 7 days and all time: dictations, words, speaking time and speaking rate
   (`stats.json` in the data folder, never trimmed; only dictations that produced text count);
 - recent dictations with recording, processing and recognition times, word counts and averages
-  (`history.jsonl` in the data folder; the text is kept only with `Logging.LogText`).
+  (the last 20 in `history.jsonl` in the data folder; the text is kept only with `Logging.LogText`).
 
 The indicator at the bottom of the screen counts seconds while recording and processing, then shows a summary
-(recording time, processing time, words) for 2 seconds — longer while the mouse is over it — with a **Text**
+(recording time, processing time, words) for 6 seconds (`Ui.ResultSeconds`) — longer while the mouse is over it — with a **Text**
 button that opens the transcript with a Copy button ("Show Last Transcript" in the menu does the same).
 
 macOS specifics:
@@ -84,7 +84,8 @@ macOS specifics:
   not inside the app. `WhisperLocal.Mac/config.json` is installed there on the first run only; afterwards edit the
   installed copy ("Open config", hot-reloaded). Delete it to get the project defaults again.
 - Hotkey names: `LeftControl`, `RightControl`, `LeftOption`, `RightOption`, `LeftCommand`, `RightCommand`,
-  `LeftShift`, `RightShift`, `Fn`, `F1`…`F20`; the Windows names (`LControlKey+LWin`, `RMenu`…) map to the
+  `LeftShift`, `RightShift`, `Fn`, `F1`…`F20`, letters, digits, `Slash`, `Comma`, `Period` and other keys
+  (e.g. `LeftOption+Slash` for Option + /; the `/` does not reach the app while the combination is held); the Windows names (`LControlKey+LWin`, `RMenu`…) map to the
   Mac keys in the same place. For `Fn`, set System Settings → Keyboard → "Press 🌐 key to" → "Do Nothing".
 - Updates are manual: "Check for Updates…" (menu and setup window) looks at the GitHub releases of the repository
   the app was built from and, after asking, downloads the DMG, checks its checksum and signer, replaces the app and

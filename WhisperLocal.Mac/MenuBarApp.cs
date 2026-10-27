@@ -28,7 +28,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private const string MicrophoneSettings = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
     private const long ActivationRegular = 0, ActivationAccessory = 1;
 
-    private static readonly TimeSpan ResultDisplay = TimeSpan.FromSeconds(2);
+    // Failures and "no speech" need only a glance; a successful summary stays Ui.ResultSeconds
+    private static readonly TimeSpan BriefDisplay = TimeSpan.FromSeconds(2);
 
     private readonly ConfigManager _config;
     private readonly IClassicDesktopStyleApplicationLifetime _desktop;
@@ -402,12 +403,12 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (cfg.Ui.ShowOverlay)
         {
             if (error != null)
-                _overlay.ShowResult($"✕ Failed: {error}", (1.0, 0.4, 0.4), hasText: false, ResultDisplay);
+                _overlay.ShowResult($"✕ Failed: {error}", (1.0, 0.4, 0.4), hasText: false, BriefDisplay);
             else if (words > 0)
                 _overlay.ShowResult($"✓ {recordSec:F1} s rec · {processSec:F1} s proc · {words} {(words == 1 ? "word" : "words")}",
-                    (0.45, 0.88, 0.5), hasText: true, ResultDisplay);
+                    (0.45, 0.88, 0.5), hasText: true, TimeSpan.FromSeconds(Math.Max(1, cfg.Ui.ResultSeconds)));
             else
-                _overlay.ShowResult($"No speech recognized · {recordSec:F1} s", (0.75, 0.75, 0.75), hasText: false, ResultDisplay);
+                _overlay.ShowResult($"No speech recognized · {recordSec:F1} s", (0.75, 0.75, 0.75), hasText: false, BriefDisplay);
         }
 
         var record = new DictationRecord(

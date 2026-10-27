@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 
@@ -15,8 +16,12 @@ public sealed class App : Application
     public override void Initialize()
     {
         Name = "WhisperLocal";
-        RequestedThemeVariant = ThemeVariant.Default; // follows the system light/dark setting
-        Styles.Add(new FluentTheme());
+        RequestedThemeVariant = ThemeVariant.Dark; // always dark, matching the menu bar indicator
+        // Fluent's accent (accent buttons, selected toggles, focus) in the app's softer blue
+        Styles.Add(new FluentTheme
+        {
+            Palettes = { [ThemeVariant.Dark] = new ColorPaletteResources { Accent = Color.Parse("#4F7FF0") } },
+        });
         // Replaces the default macOS application menu (which would offer "About Avalonia")
         NativeMenu.SetMenu(this, new NativeMenu());
     }

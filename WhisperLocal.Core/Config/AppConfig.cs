@@ -52,8 +52,10 @@ public sealed class HotkeyConfig
     public int MinHoldMs { get; set; } = 300;
 
     /// <summary>
-    /// Single non-modifier key only (F13, Scroll, ...): swallow it so the active app never sees it.
-    /// Modifiers and combinations are never swallowed; a lone Win/Alt release is masked instead.
+    /// Swallow the hotkey's non-modifier key so the active app never sees it.
+    /// Windows: single non-modifier keys only (F13, Scroll, ...); combinations are never swallowed and a lone
+    /// Win/Alt release is masked instead. macOS: also the character key of a combination (the "/" of Option+/)
+    /// while the combination is held. Modifiers are never swallowed.
     /// </summary>
     public bool SuppressKey { get; set; } = true;
 }
@@ -196,6 +198,9 @@ public sealed class InsertConfig
 public sealed class UiConfig
 {
     public bool ShowOverlay { get; set; } = true;
+
+    /// <summary>How long the indicator shows a successful dictation's summary (longer while the mouse is over it).</summary>
+    public double ResultSeconds { get; set; } = 6;
 }
 
 public sealed class LoggingConfig
