@@ -42,7 +42,9 @@ jobs:
           scripts/build-mac.sh --dmg 2>&1 | tee build.log
 
       - name: Self-test the app (native classes and symbols resolve)
-        run: artifacts/WhisperLocal.app/Contents/MacOS/WhisperLocal --self-test
+        run: |
+          set -o pipefail
+          artifacts/WhisperLocal.app/Contents/MacOS/WhisperLocal --self-test 2>&1 | tee -a build.log
 
       # The log tail as an annotation, readable from the checks API without access to the full logs
       - name: Report build failure
