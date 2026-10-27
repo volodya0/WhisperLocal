@@ -51,6 +51,7 @@ Apple Silicon або Intel, macOS 12+.
    ```
    Перший запуск збирає whisper.cpp (зафіксований тег, див. скрипт) у `WhisperLocal.Mac/Runtime/whisper` (не в git).
    Якщо вже стоїть `brew install whisper-cpp`, можна вказати `"whisper-server"` у `Whisper.ServerExe` — він знайдеться в PATH.
+   Готові DMG: кожен push збирає образ на GitHub (Actions → «macOS build» → Artifacts); теги `v*` додають його до релізу.
 3. Скачати модель у `~/Library/Application Support/WhisperLocal/models`:
    ```
    scripts/get-model.sh

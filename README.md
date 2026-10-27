@@ -50,6 +50,7 @@ Same pipeline, macOS-native pieces: CGEventTap hotkey → AudioQueue capture (16
    ```
    The first run builds whisper.cpp (pinned tag, see the script) into `WhisperLocal.Mac/Runtime/whisper`, not in git.
    Already have `brew install whisper-cpp`? Set `Whisper.ServerExe` to `"whisper-server"` and it is found in PATH.
+   Prebuilt DMGs: every push builds one on GitHub (Actions → "macOS build" → Artifacts); tags `v*` attach it to the release.
 3. Download the model into `~/Library/Application Support/WhisperLocal/models`:
    ```
    scripts/get-model.sh
