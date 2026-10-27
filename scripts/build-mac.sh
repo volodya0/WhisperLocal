@@ -82,12 +82,11 @@ chmod +x "$APP/Contents/MacOS/WhisperLocal" "$APP/Contents/MacOS/whisper/whisper
 # Signing with a stable identity (e.g. a self-signed "Code Signing" certificate from Keychain Access) avoids that.
 IDENTITY="${CODESIGN_IDENTITY:--}"
 echo "==> Signing (identity: $IDENTITY)"
-# Every Mach-O file (runtime dylibs, apphost, whisper-server) first, then the bundle itself
-find "$APP/Contents/MacOS" -type f | while read -r f; do
-    if file "$f" | grep -q "Mach-O"; then
-        codesign --force --sign "$IDENTITY" "$f"
-    fi
-done
+# codesign treats everything in Contents/MacOS as code, including .NET's .dll/.json files (their signatures go
+# into extended attributes), so every file is signed first, the main executable last, then the bundle
+find "$APP/Contents/MacOS" -type f ! -path "$APP/Contents/MacOS/WhisperLocal" -print0 \
+    | xargs -0 codesign --force --sign "$IDENTITY"
+codesign --force --sign "$IDENTITY" "$APP/Contents/MacOS/WhisperLocal"
 codesign --force --sign "$IDENTITY" "$APP"
 codesign --verify "$APP"
 
