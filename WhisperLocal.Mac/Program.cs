@@ -25,6 +25,9 @@ internal static class Program
             return 1;
         }
 
+        if (args.Length > 0 && args[0] == "--self-test")
+            return SelfTest();
+
         InstallDefaultConfig();
 
         if (args.Length > 0 && args[0].Equals("--batch", StringComparison.OrdinalIgnoreCase))
@@ -65,6 +68,39 @@ internal static class Program
         app.Dispose();
         config.Dispose();
         return 0;
+    }
+
+    /// <summary>
+    /// Checks that every native class and symbol the app uses resolves (run by CI after building the .app),
+    /// so a missing framework fails the build instead of crashing silently at launch.
+    /// </summary>
+    private static int SelfTest()
+    {
+        string[] classes =
+        [
+            "NSApplication", "NSStatusBar", "NSMenu", "NSMenuItem", "NSWindow", "NSPanel", "NSTextField", "NSButton",
+            "NSColor", "NSFont", "NSImage", "NSAlert", "NSEvent", "NSScreen", "NSWorkspace", "NSPasteboard",
+            "NSPasteboardItem", "NSString", "NSData", "NSDictionary", "NSNumber", "NSMutableArray", "NSObject",
+        ];
+        try
+        {
+            foreach (var name in classes)
+                ObjC.Class(name);
+            MacNative.LoadFramework("AVFoundation");
+            ObjC.Class("AVCaptureDevice");
+            _ = MacNative.DispatchMainQueue;
+            _ = MacNative.kCFRunLoopCommonModes;
+            _ = MacNative.CGEventSourceFlagsState(MacNative.kCGEventSourceStateHIDSystemState);
+            _ = MacNative.AXIsProcessTrusted();
+            ObjC.WithPool(() => ObjC.Send(ObjC.Class("NSApplication"), ObjC.Sel("sharedApplication")));
+            Console.WriteLine("Self-test OK");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Self-test failed: {ex}");
+            return 1;
+        }
     }
 
     /// <summary>

@@ -32,6 +32,13 @@ internal static class ObjC
     private static readonly Dictionary<string, IntPtr> Selectors = new();
     private static readonly Dictionary<string, IntPtr> Classes = new();
 
+    // A .NET process links none of the Cocoa frameworks: their classes exist only once the framework is loaded
+    static ObjC()
+    {
+        NativeLibrary.Load("/System/Library/Frameworks/Foundation.framework/Foundation");
+        NativeLibrary.Load("/System/Library/Frameworks/AppKit.framework/AppKit");
+    }
+
     [DllImport(Lib)] private static extern IntPtr objc_getClass(string name);
     [DllImport(Lib)] private static extern IntPtr sel_registerName(string name);
     [DllImport(Lib)] public static extern IntPtr objc_allocateClassPair(IntPtr superclass, string name, nint extraBytes);
