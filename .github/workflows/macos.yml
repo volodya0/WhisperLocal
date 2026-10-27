@@ -45,7 +45,9 @@ jobs:
       - name: Report build failure
         if: failure()
         run: |
-          echo "::error title=build-mac.sh failed::$(tail -n 80 build.log | awk '{ gsub(/%/, "%25"); gsub(/\r/, ""); printf "%s%%0A", $0 }')"
+          # Annotations are cut at a few KB: skip compiler progress lines, keep error lines and the very end
+          { grep -iE "error|fatal|failed|denied|not found|no such" build.log | grep -v "^\[" | tail -n 15; echo "-----"; grep -v "^\[ *[0-9]*%\]" build.log | tail -n 15; } > report.txt
+          echo "::error title=build-mac.sh failed::$(awk '{ gsub(/%/, "%25"); gsub(/\r/, ""); printf "%s%%0A", substr($0, 1, 200) }' report.txt)"
 
       - uses: actions/upload-artifact@v4
         with:
