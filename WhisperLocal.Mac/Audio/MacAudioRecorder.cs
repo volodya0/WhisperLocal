@@ -142,30 +142,41 @@ internal sealed unsafe class MacAudioRecorder : IDisposable
         });
     }
 
+    public enum MicrophoneAccess { NotAsked, Allowed, Denied, Unknown }
+
+    /// <summary>[AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio].</summary>
+    public static MicrophoneAccess GetMicrophoneAccess()
+    {
+        try
+        {
+            LoadFramework("AVFoundation");
+            // AVMediaTypeAudio == @"soun"
+            var status = ObjC.WithPool(() => ObjC.SendLong(ObjC.Class("AVCaptureDevice"),
+                ObjC.Sel("authorizationStatusForMediaType:"), ObjC.Str("soun")));
+            return status switch
+            {
+                0 => MicrophoneAccess.NotAsked,
+                3 => MicrophoneAccess.Allowed,
+                1 or 2 => MicrophoneAccess.Denied, // restricted, denied
+                _ => MicrophoneAccess.Unknown,
+            };
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"Microphone permission check failed: {ex.Message}");
+            return MicrophoneAccess.Unknown;
+        }
+    }
+
     /// <summary>
     /// The system asks for microphone access on the first recording; a denied permission
     /// would silently record zeros, so it is reported as an error instead.
     /// </summary>
     private static void CheckMicrophoneAccess()
     {
-        try
-        {
-            LoadFramework("AVFoundation");
-            // [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio]; AVMediaTypeAudio == @"soun"
-            var status = ObjC.WithPool(() => ObjC.SendLong(ObjC.Class("AVCaptureDevice"),
-                ObjC.Sel("authorizationStatusForMediaType:"), ObjC.Str("soun")));
-            if (status is 1 or 2) // restricted, denied
-                throw new InvalidOperationException(
-                    "microphone access is denied. Allow WhisperLocal in System Settings → Privacy & Security → Microphone");
-        }
-        catch (InvalidOperationException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Log.Debug($"Microphone permission check skipped: {ex.Message}");
-        }
+        if (GetMicrophoneAccess() == MicrophoneAccess.Denied)
+            throw new InvalidOperationException(
+                "microphone access is denied. Allow WhisperLocal in System Settings → Privacy & Security → Microphone");
     }
 
     /// <summary>Picks the input device whose name contains <paramref name="name"/>; returns the device name used.</summary>

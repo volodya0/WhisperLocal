@@ -29,13 +29,13 @@ internal sealed class MenuBarApp : IDisposable
     private readonly DictationPipeline _pipeline;
     private readonly MacTextInserter _inserter = new();
     private readonly RecordingOverlay _overlay = new();
+    private readonly StatusWindow _statusWindow;
     private readonly System.Threading.Timer _idleTimer;
 
     private State _state = State.Idle;
     private bool _enabled = true;
     private long _pressedAt;
     private DateTime _lastActivityUtc = DateTime.UtcNow;
-    private bool _modelDialogOpen;
     private FrontmostApp? _target;
     private bool _disposed;
 
@@ -48,6 +48,8 @@ internal sealed class MenuBarApp : IDisposable
         _pipeline = new DictationPipeline(config, _stt, _llm);
 
         _menu = new StatusMenu();
+        _menu.AddItem("Setup & Status…", () => _statusWindow!.Show());
+        _menu.AddSeparator();
         _enabledItem = _menu.AddItem("Enabled", ToggleEnabled);
         _unloadItem = _menu.AddItem("Unload from memory", async () => await UnloadFromMemoryAsync());
         _menu.AddSeparator();
@@ -72,6 +74,12 @@ internal sealed class MenuBarApp : IDisposable
         _recorder.MaxDurationReached += () => _ui.Post(_ => _ = FinishRecordingAsync(), null);
         _config.Changed += () => _ui.Post(_ => ApplyConfig(), null);
 
+        _statusWindow = new StatusWindow(config, _ui, () => _hotkey.IsInstalled, RequestMicrophone);
+        _hotkey.Installed += () => _statusWindow.Refresh();
+        // Opening the app again from Finder/Launchpad/Spotlight brings up the window (there is no Dock icon to click)
+        ActionTarget.Reopen += () => _statusWindow.Show();
+        ObjC.Send(ObjC.Send(ObjC.Class("NSApplication"), ObjC.Sel("sharedApplication")), ObjC.Sel("setDelegate:"), ActionTarget.Instance);
+
         _idleTimer = new System.Threading.Timer(_ => _ui.Post(_ => CheckIdle(), null), null, 30_000, 30_000);
 
         ApplyConfig();
@@ -79,8 +87,28 @@ internal sealed class MenuBarApp : IDisposable
         var version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3);
         Log.Info($"WhisperLocal {version} (macOS) started, config: {_config.FilePath}");
 
-        if (config.Current.Whisper.StartOnLaunch)
+        if (_statusWindow.HasProblems)
+            _statusWindow.Show();
+        else if (config.Current.Whisper.StartOnLaunch)
             _ = WarmUpWhisperAsync();
+    }
+
+    /// <summary>A short recording makes macOS show its microphone permission prompt.</summary>
+    private async void RequestMicrophone()
+    {
+        if (_state != State.Idle)
+            return;
+        try
+        {
+            _recorder.Start(_config.Current.Audio.DeviceName, 1);
+            await Task.Delay(500);
+            await _recorder.StopAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Microphone request failed", ex);
+            Dialogs.Notify($"Microphone error: {ex.Message}");
+        }
     }
 
     /// <summary>Shows the system Accessibility prompt if the permission is missing (needed for the hotkey and for Cmd+V).</summary>
@@ -272,21 +300,11 @@ internal sealed class MenuBarApp : IDisposable
         Dialogs.Notify($"{context}: {ex.Message}");
     }
 
+    /// <summary>The setup window explains what is missing and can download the model.</summary>
     private void ShowModelMissing(ModelNotFoundException ex)
     {
         Log.Error(ex.Message.ReplaceLineEndings(" "));
-        // Startup warm-up and a hotkey press may both hit this; one dialog at a time
-        if (_modelDialogOpen)
-            return;
-        _modelDialogOpen = true;
-        try
-        {
-            Dialogs.Show("WhisperLocal: model not found", ex.Message);
-        }
-        finally
-        {
-            _modelDialogOpen = false;
-        }
+        _statusWindow.Show();
     }
 
     private void SetState(State state)
@@ -349,6 +367,7 @@ internal sealed class MenuBarApp : IDisposable
         _stt.Dispose();
         _llm.Dispose();
         _overlay.Dispose();
+        _statusWindow.Dispose();
         _menu.Dispose();
     }
 }

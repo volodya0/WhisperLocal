@@ -62,6 +62,10 @@ Same pipeline, macOS-native pieces: CGEventTap hotkey → AudioQueue capture (16
    - **Microphone**: asked on the first dictation.
 5. Hold **Left Control + Left Command**, speak, release.
 
+A **setup window** opens at launch when something is missing (and from the menu, or by opening WhisperLocal
+from Applications again): Accessibility, microphone, whisper-server and the model, each with a button to fix it,
+including an in-app model download.
+
 macOS specifics:
 
 - Config, logs and models live in `~/Library/Application Support/WhisperLocal` ("Show data folder" in the menu),

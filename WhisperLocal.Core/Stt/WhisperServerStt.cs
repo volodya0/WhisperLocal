@@ -198,7 +198,7 @@ public sealed class WhisperServerStt : ISpeechToText
     /// Relative paths are relative to the executable's directory; a bare file name ("whisper-server")
     /// that is not there is looked up in PATH and the usual Homebrew locations.
     /// </summary>
-    private static string ResolveServerExe(string serverExe)
+    internal static string ResolveServerExe(string serverExe)
     {
         var exe = AppPaths.ResolveRuntime(serverExe);
         if (File.Exists(exe) || serverExe.IndexOfAny(['/', '\\']) >= 0)

@@ -5,6 +5,7 @@
 - macOS version (`WhisperLocal.Mac`): menu bar app with a CGEventTap push-to-talk hotkey, AudioQueue capture,
   whisper-server built with Metal, pasteboard + Cmd+V insertion, LaunchAgent autostart and `--batch` via `afconvert`.
   `scripts/build-mac.sh` builds `WhisperLocal.app`, `scripts/get-model.sh` downloads the model.
+- macOS setup window: permission, server and model status with fix-it buttons and an in-app model download.
 - Platform-neutral code moved to `WhisperLocal.Core`, shared by the Windows and macOS apps.
 
 ## 1.0.0 — 2026-10-27
