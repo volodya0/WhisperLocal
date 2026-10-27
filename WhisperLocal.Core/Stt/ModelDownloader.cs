@@ -34,6 +34,13 @@ public static class ModelDownloader
 
         Log.Info($"Downloading {url} to {partial}" + (existing > 0 ? $", resuming at {existing} bytes" : ""));
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        // 416: the partial file is already complete (e.g. the app quit during the hash check); just verify it
+        if (response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable && existing > 0)
+        {
+            progress.Report((existing, existing));
+            await VerifyAndInstallAsync(partial, modelPath, verifying, ct);
+            return;
+        }
         response.EnsureSuccessStatusCode();
 
         // A server that ignores the range sends the whole file again
@@ -62,6 +69,11 @@ public static class ModelDownloader
             progress.Report((done, total));
         }
 
+        await VerifyAndInstallAsync(partial, modelPath, verifying, ct);
+    }
+
+    private static async Task VerifyAndInstallAsync(string partial, string modelPath, Action verifying, CancellationToken ct)
+    {
         if (KnownHashes.TryGetValue(Path.GetFileName(modelPath), out var expected))
         {
             verifying();

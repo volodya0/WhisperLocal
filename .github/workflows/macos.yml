@@ -1,5 +1,10 @@
 # Builds WhisperLocal.app for macOS on GitHub's Mac runners and publishes a drag-to-Applications DMG:
-# as a workflow artifact on every run, and as a GitHub Release asset for tags like v1.1.0.
+# as a workflow artifact on every run, and as a GitHub Release asset for tags like v1.1.0
+# (the tag is the app version, and "Check for Updates" in the app looks at these releases).
+#
+# Signing: with the repository secrets MACOS_CERT_P12 (base64 of a .p12 with a code signing certificate,
+# a self-signed one is enough) and MACOS_CERT_PASSWORD, every build is signed with that certificate, so macOS
+# keeps the Accessibility permission across updates. Without them the build is signed ad hoc.
 name: macOS build
 
 on:
@@ -9,13 +14,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Builds (including pull requests) only read; the release job alone may write
 permissions:
-  contents: write # attach the DMG to releases
+  contents: read
 
 jobs:
   build:
     # Apple Silicon only; scripts/build-mac.sh still builds for Intel when run on an Intel Mac
     runs-on: macos-15
+    env:
+      HAS_CERT: ${{ secrets.MACOS_CERT_P12 != '' }}
+      UPDATE_REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,11 +32,45 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      # whisper-server only changes with the pinned whisper.cpp tag in the build script
+      - name: Version and whisper.cpp tag
+        id: meta
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          fi
+          echo "whisper=$(grep -oE 'WHISPER_CPP_TAG:-v[0-9.]+' scripts/build-mac.sh | cut -d- -f2)" >> "$GITHUB_OUTPUT"
+
+      # whisper-server only changes with the pinned whisper.cpp tag
       - uses: actions/cache@v4
         with:
           path: WhisperLocal.Mac/Runtime/whisper
-          key: whisper-server-arm64-${{ hashFiles('scripts/build-mac.sh') }}
+          key: whisper-server-arm64-${{ steps.meta.outputs.whisper }}
+
+      - name: Import the signing certificate
+        if: env.HAS_CERT == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p ci "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          # A self-signed certificate is not trusted for code signing until told so
+          security find-certificate -a -p "$KEYCHAIN" > "$RUNNER_TEMP/cert.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"
+          IDENTITY=$(security find-identity -p codesigning "$KEYCHAIN" | awk '$2 ~ /^[0-9A-F]{40}$/ {print $2; exit}')
+          if [[ -z "$IDENTITY" ]]; then
+            security find-identity -p codesigning "$KEYCHAIN"
+            echo "::error::No code signing identity found in MACOS_CERT_P12"
+            exit 1
+          fi
+          echo "CODESIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          rm "$RUNNER_TEMP/cert.p12"
 
       - name: Build app and DMG
         run: |
@@ -53,8 +96,18 @@ jobs:
           path: artifacts/*.dmg
           if-no-files-found: error
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the DMG to the release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: WhisperLocal-macOS-arm64
+          path: artifacts
+
+      - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*.dmg

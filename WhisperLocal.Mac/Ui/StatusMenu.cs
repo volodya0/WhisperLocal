@@ -8,10 +8,13 @@ internal sealed class StatusMenu : IDisposable
 {
     public enum Icon { Idle, Recording, Processing, Off }
 
-    // The waveform of the Windows tray icon as a template image (scripts/make-mac-icons.py), so macOS colours it
-    // for light/dark menu bars and the tint below applies; a system symbol if the file is missing
-    private static readonly Lazy<IntPtr> OnImage = new(() => LoadImage("MenuBarIcon.png", "waveform"));
-    private static readonly Lazy<IntPtr> OffImage = new(() => LoadImage("MenuBarIconOff.png", "mic.slash"));
+    // The waveform of the Windows tray icon (scripts/make-mac-icons.py). Idle/off are template images, which macOS
+    // colours for light/dark menu bars; the menu bar ignores tint colours, so recording/processing are coloured images.
+    // A system symbol stands in if a file is missing.
+    private static readonly Lazy<IntPtr> IdleImage = new(() => LoadImage("MenuBarIcon.png", "waveform", template: true));
+    private static readonly Lazy<IntPtr> OffImage = new(() => LoadImage("MenuBarIconOff.png", "mic.slash", template: true));
+    private static readonly Lazy<IntPtr> RecordingImage = new(() => LoadImage("MenuBarIconRecording.png", "mic.fill", template: false));
+    private static readonly Lazy<IntPtr> ProcessingImage = new(() => LoadImage("MenuBarIconProcessing.png", "ellipsis.circle", template: false));
 
     private readonly IntPtr _statusItem;
     private readonly IntPtr _menu;
@@ -55,7 +58,13 @@ internal sealed class StatusMenu : IDisposable
         if (button == IntPtr.Zero)
             return;
 
-        var image = icon == Icon.Off ? OffImage.Value : OnImage.Value;
+        var image = icon switch
+        {
+            Icon.Recording => RecordingImage.Value,
+            Icon.Processing => ProcessingImage.Value,
+            Icon.Off => OffImage.Value,
+            _ => IdleImage.Value,
+        };
         if (image != IntPtr.Zero)
         {
             Send(button, Sel("setImage:"), image);
@@ -66,19 +75,11 @@ internal sealed class StatusMenu : IDisposable
             Send(button, Sel("setTitle:"), Str(icon == Icon.Off ? "WL-" : "WL"));
         }
 
-        // Template images take the tint: red while recording, orange while processing, default otherwise
-        var tint = icon switch
-        {
-            Icon.Recording => Send(Class("NSColor"), Sel("systemRedColor")),
-            Icon.Processing => Send(Class("NSColor"), Sel("systemOrangeColor")),
-            _ => IntPtr.Zero,
-        };
-        Send(button, Sel("setContentTintColor:"), tint);
         Send(button, Sel("setToolTip:"), Str(tooltip));
     }
 
-    /// <summary>Retained template image, 18×18 pt (the PNG is 36 px for Retina).</summary>
-    private static IntPtr LoadImage(string fileName, string fallbackSymbol)
+    /// <summary>Retained image, 18×18 pt (the PNG is 36 px for Retina).</summary>
+    private static IntPtr LoadImage(string fileName, string fallbackSymbol, bool template)
     {
         var path = Path.Combine(AppContext.BaseDirectory, fileName);
         var image = File.Exists(path)
@@ -88,7 +89,8 @@ internal sealed class StatusMenu : IDisposable
             return image;
         if (File.Exists(path))
             Send(image, Sel("setSize:"), new NSSize(18, 18));
-        Send(image, Sel("setTemplate:"), true);
+        // A missing coloured image falls back to a symbol, which has to be a template to be visible at all
+        Send(image, Sel("setTemplate:"), template || !File.Exists(path));
         return image;
     }
 

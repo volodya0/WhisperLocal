@@ -22,6 +22,26 @@ public sealed class WhisperServerStt : ISpeechToText
     public WhisperServerStt(ConfigManager config) => _config = config;
 
     public bool IsLoaded => _process is { HasExited: false };
+
+    /// <summary>Resident memory of the running whisper-server, or null when it is not running or unknown.</summary>
+    public long? MemoryBytes
+    {
+        get
+        {
+            try
+            {
+                var p = _process;
+                if (p is not { HasExited: false })
+                    return null;
+                p.Refresh();
+                return p.WorkingSet64 > 0 ? p.WorkingSet64 : null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+    }
     public DateTime LastUsedUtc { get; private set; } = DateTime.UtcNow;
 
     public async Task WarmUpAsync(CancellationToken ct)
@@ -129,7 +149,7 @@ public sealed class WhisperServerStt : ISpeechToText
         Log.Info($"Starting whisper-server: \"{exe}\" {args}");
         var sw = Stopwatch.StartNew();
         process.Start();
-        ChildProcessJob.Add(process);
+        ChildProcessJob.Add(process, Path.GetFileNameWithoutExtension(exe));
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
         _process = process;

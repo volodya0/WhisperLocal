@@ -13,9 +13,10 @@
     <PackageReference Include="NAudio.Core" Version="2.2.1" />
   </ItemGroup>
 
-  <!-- Both apps (WhisperLocal and WhisperLocal.Mac) build an assembly named WhisperLocal -->
+  <!-- Both apps (WhisperLocal and WhisperLocal.Mac) build an assembly named WhisperLocal; WhisperLocal.Ui is the shared UI -->
   <ItemGroup>
     <InternalsVisibleTo Include="WhisperLocal" />
+    <InternalsVisibleTo Include="WhisperLocal.Ui" />
   </ItemGroup>
 
 </Project>

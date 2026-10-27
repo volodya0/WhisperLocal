@@ -19,6 +19,21 @@ internal static class Dialogs
         Release(alert);
     });
 
+    /// <summary>Modal alert with two buttons; true if the first (default) button was clicked.</summary>
+    public static bool Ask(string title, string message, string yes, string no) => WithPool(() =>
+    {
+        const long firstButtonReturn = 1000; // NSAlertFirstButtonReturn
+        var alert = New("NSAlert");
+        Send(alert, Sel("setMessageText:"), Str(title));
+        Send(alert, Sel("setInformativeText:"), Str(message));
+        Send(alert, Sel("addButtonWithTitle:"), Str(yes));
+        Send(alert, Sel("addButtonWithTitle:"), Str(no));
+        Send(Send(Class("NSApplication"), Sel("sharedApplication")), Sel("activateIgnoringOtherApps:"), true);
+        var result = SendLong(alert, Sel("runModal"));
+        Release(alert);
+        return result == firstButtonReturn;
+    });
+
     /// <summary>
     /// Banner notification (the tray balloon of the Windows version). Posted through osascript, which works
     /// without registering for UNUserNotificationCenter; the notification shows Script Editor as its sender.

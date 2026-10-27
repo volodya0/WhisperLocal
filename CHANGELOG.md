@@ -5,6 +5,13 @@
 - macOS version (`WhisperLocal.Mac`): menu bar app with a CGEventTap push-to-talk hotkey, AudioQueue capture,
   whisper-server built with Metal, pasteboard + Cmd+V insertion, LaunchAgent autostart and `--batch` via `afconvert`.
   `scripts/build-mac.sh` builds `WhisperLocal.app`, `scripts/get-model.sh` downloads the model.
+- macOS: manual "Check for Updates…" from GitHub releases (checksum and signer verified), version from the release
+  tag, CI signing with a stable certificate; app and menu bar icons from the Windows tray icon design.
+- Shared cross-platform windows (`WhisperLocal.Ui`, Avalonia): main window with setup checklist, hotkey selector
+  (presets and recording), model memory with Unload/Load, file buttons and recent dictations with timing statistics;
+  transcript window with Copy. Used by the macOS app; the Windows app can adopt it next.
+- Lifetime statistics (today / 7 days / all time): dictations, words, speaking time, words per minute.
+- macOS indicator: live seconds while recording/processing, then a summary (times, words) with a Text button.
 - macOS setup window: permission, server and model status with fix-it buttons and an in-app model download.
 - Platform-neutral code moved to `WhisperLocal.Core`, shared by the Windows and macOS apps.
 

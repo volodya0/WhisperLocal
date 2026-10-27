@@ -14,24 +14,34 @@ internal sealed unsafe class MacAudioRecorder : IDisposable
     private const int BufferCount = 4;
     private const uint BufferBytes = SampleRate * 2 / 20; // 50 ms
 
-    private readonly object _sync = new();
-    private IntPtr _queue;
-    private GCHandle _self;
-    private MemoryStream? _buffer;
-    private long _maxBytes;
-    private bool _limitHit;
-    private volatile bool _stopping;
+    /// <summary>
+    /// One recording: its queue, buffer and the GCHandle the audio callback gets. Kept separate per recording,
+    /// so a stop still finishing in the background can never touch the next recording.
+    /// </summary>
+    private sealed class Session(MacAudioRecorder owner, long maxBytes)
+    {
+        public readonly object Sync = new();
+        public readonly MacAudioRecorder Owner = owner;
+        public readonly MemoryStream Buffer = new(SampleRate * 2 * 15);
+        public readonly long MaxBytes = maxBytes;
+        public IntPtr Queue;
+        public GCHandle Handle;
+        public bool LimitHit;
+        public volatile bool Stopping;
+    }
+
+    private Session? _session;
 
     /// <summary>Raised on the audio thread when MaxDurationSec is reached.</summary>
     public event Action? MaxDurationReached;
 
-    public bool IsRecording => _queue != IntPtr.Zero;
+    public bool IsRecording => _session != null;
 
     public static IReadOnlyList<string> ListDevices() => InputDevices().Select(d => d.Name).ToList();
 
     public void Start(string? deviceName, int maxSeconds)
     {
-        if (_queue != IntPtr.Zero)
+        if (_session != null)
             throw new InvalidOperationException("Recording is already in progress");
 
         CheckMicrophoneAccess();
@@ -48,33 +58,28 @@ internal sealed unsafe class MacAudioRecorder : IDisposable
             BitsPerChannel = 16,
         };
 
-        lock (_sync)
-        {
-            _buffer = new MemoryStream(SampleRate * 2 * 15);
-            _maxBytes = maxSeconds > 0 ? (long)SampleRate * 2 * maxSeconds : long.MaxValue;
-            _limitHit = false;
-        }
-        _stopping = false;
-        _self = GCHandle.Alloc(this);
-
-        // No run loop: callbacks come on an internal AudioQueue thread
-        Check(AudioQueueNewInput(format, &OnInput, GCHandle.ToIntPtr(_self), IntPtr.Zero, IntPtr.Zero, 0, out var queue), "AudioQueueNewInput");
+        var session = new Session(this, maxSeconds > 0 ? (long)SampleRate * 2 * maxSeconds : long.MaxValue);
+        session.Handle = GCHandle.Alloc(session);
         try
         {
-            var device = SelectDevice(queue, deviceName);
+            // No run loop: callbacks come on an internal AudioQueue thread
+            Check(AudioQueueNewInput(format, &OnInput, GCHandle.ToIntPtr(session.Handle), IntPtr.Zero, IntPtr.Zero, 0, out session.Queue),
+                "AudioQueueNewInput");
+            var device = SelectDevice(session.Queue, deviceName);
             for (var i = 0; i < BufferCount; i++)
             {
-                Check(AudioQueueAllocateBuffer(queue, BufferBytes, out var buffer), "AudioQueueAllocateBuffer");
-                Check(AudioQueueEnqueueBuffer(queue, buffer, 0, IntPtr.Zero), "AudioQueueEnqueueBuffer");
+                Check(AudioQueueAllocateBuffer(session.Queue, BufferBytes, out var buffer), "AudioQueueAllocateBuffer");
+                Check(AudioQueueEnqueueBuffer(session.Queue, buffer, 0, IntPtr.Zero), "AudioQueueEnqueueBuffer");
             }
-            Check(AudioQueueStart(queue, IntPtr.Zero), "AudioQueueStart");
-            _queue = queue;
+            Check(AudioQueueStart(session.Queue, IntPtr.Zero), "AudioQueueStart");
+            _session = session;
             Log.Debug($"Recording started: '{device}', 16 kHz mono");
         }
         catch
         {
-            AudioQueueDispose(queue, true);
-            _self.Free();
+            if (session.Queue != IntPtr.Zero)
+                AudioQueueDispose(session.Queue, true);
+            session.Handle.Free();
             throw;
         }
     }
@@ -84,10 +89,10 @@ internal sealed unsafe class MacAudioRecorder : IDisposable
     {
         try
         {
-            if (GCHandle.FromIntPtr(userData).Target is not MacAudioRecorder self)
+            if (GCHandle.FromIntPtr(userData).Target is not Session session)
                 return;
-            self.OnData(buffer);
-            if (!self._stopping)
+            OnData(session, buffer);
+            if (!session.Stopping)
                 AudioQueueEnqueueBuffer(queue, buffer, 0, IntPtr.Zero);
         }
         catch (Exception ex)
@@ -96,50 +101,50 @@ internal sealed unsafe class MacAudioRecorder : IDisposable
         }
     }
 
-    private void OnData(AudioQueueBuffer* buffer)
+    private static void OnData(Session session, AudioQueueBuffer* buffer)
     {
         var size = (int)buffer->AudioDataByteSize;
         if (size == 0)
             return;
 
         var limitReached = false;
-        lock (_sync)
+        lock (session.Sync)
         {
-            if (_buffer == null || _limitHit)
+            if (session.Stopping || session.LimitHit)
                 return;
-            var count = (int)Math.Min(_maxBytes - _buffer.Length, size);
+            var count = (int)Math.Min(session.MaxBytes - session.Buffer.Length, size);
             count -= count % 2;
-            _buffer.Write(new ReadOnlySpan<byte>((void*)buffer->AudioData, count));
+            session.Buffer.Write(new ReadOnlySpan<byte>((void*)buffer->AudioData, count));
             if (count < size)
-                _limitHit = limitReached = true;
+                session.LimitHit = limitReached = true;
         }
         if (limitReached)
-            MaxDurationReached?.Invoke();
+            session.Owner.MaxDurationReached?.Invoke();
     }
 
     /// <summary>Stops capture and returns 16 kHz mono 16-bit PCM (no WAV header).</summary>
     public Task<byte[]> StopAsync()
     {
-        var queue = _queue;
-        if (queue == IntPtr.Zero)
+        var session = _session;
+        if (session == null)
             return Task.FromResult<byte[]>([]);
-        _queue = IntPtr.Zero;
+        _session = null;
+        return Task.Run(() => Stop(session));
+    }
 
-        return Task.Run(() =>
+    private static byte[] Stop(Session session)
+    {
+        byte[] pcm;
+        lock (session.Sync)
         {
-            _stopping = true;
-            // Synchronous stop: no callbacks run after it returns (the last <= 50 ms buffer is dropped)
-            AudioQueueStop(queue, true);
-            AudioQueueDispose(queue, true);
-            _self.Free();
-
-            lock (_sync)
-            {
-                var pcm = _buffer?.ToArray() ?? [];
-                _buffer = null;
-                return pcm;
-            }
-        });
+            session.Stopping = true;
+            pcm = session.Buffer.ToArray();
+        }
+        // Synchronous stop: no callbacks run after it returns, so the handle can go (the last <= 50 ms are dropped)
+        AudioQueueStop(session.Queue, true);
+        AudioQueueDispose(session.Queue, true);
+        session.Handle.Free();
+        return pcm;
     }
 
     public enum MicrophoneAccess { NotAsked, Allowed, Denied, Unknown }
@@ -264,12 +269,9 @@ internal sealed unsafe class MacAudioRecorder : IDisposable
 
     public void Dispose()
     {
-        if (_queue == IntPtr.Zero)
-            return;
-        _stopping = true;
-        AudioQueueStop(_queue, true);
-        AudioQueueDispose(_queue, true);
-        _queue = IntPtr.Zero;
-        _self.Free();
+        var session = _session;
+        _session = null;
+        if (session != null)
+            Stop(session);
     }
 }

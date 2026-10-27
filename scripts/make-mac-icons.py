@@ -6,6 +6,8 @@ five waveform bars on a dark rounded square.
   WhisperLocal.Mac/Resources/AppIcon.icns          app icon (Finder, Dock), macOS icon grid
   WhisperLocal.Mac/Resources/MenuBarIcon.png       menu bar template image (bars only, 36 px = 18 pt @2x)
   WhisperLocal.Mac/Resources/MenuBarIconOff.png    the same, faded (dictation disabled)
+  WhisperLocal.Mac/Resources/MenuBarIconRecording.png / MenuBarIconProcessing.png
+                                                   coloured (not template) bars: the menu bar ignores tint colours
 
 Requires Pillow (pip install pillow). Run from anywhere: python3 scripts/make-mac-icons.py
 """
@@ -48,12 +50,12 @@ def app_icon(px):
     return img.resize((px, px), Image.LANCZOS)
 
 
-def menu_bar_icon(px, alpha):
-    """Template image: only the alpha channel matters, macOS colours it for light/dark menu bars."""
+def menu_bar_icon(px, color):
+    """Template images use only the alpha channel (macOS colours them for light/dark menu bars)."""
     s = px * SUPERSAMPLE
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     # Wider, taller bars than on the filled tray icon: there is no background square around them
-    draw_bars(ImageDraw.Draw(img), (0, 0, s), (0, 0, 0, alpha), bar_ratio=0.13, gap_ratio=0.075, height_ratio=0.9)
+    draw_bars(ImageDraw.Draw(img), (0, 0, s), color, bar_ratio=0.13, gap_ratio=0.075, height_ratio=0.9)
     return img.resize((px, px), Image.LANCZOS)
 
 
@@ -80,8 +82,11 @@ def write_icns(path):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     write_icns(OUT / "AppIcon.icns")
-    menu_bar_icon(36, 255).save(OUT / "MenuBarIcon.png")
-    menu_bar_icon(36, 110).save(OUT / "MenuBarIconOff.png")
+    menu_bar_icon(36, (0, 0, 0, 255)).save(OUT / "MenuBarIcon.png")
+    menu_bar_icon(36, (0, 0, 0, 110)).save(OUT / "MenuBarIconOff.png")
+    # macOS systemRed / systemOrange, as on the Windows tray icon's recording/processing states
+    menu_bar_icon(36, (255, 59, 48, 255)).save(OUT / "MenuBarIconRecording.png")
+    menu_bar_icon(36, (255, 149, 0, 255)).save(OUT / "MenuBarIconProcessing.png")
     print(f"Written to {OUT}")
 
 

@@ -72,6 +72,12 @@ internal sealed unsafe class HotkeyTap : IDisposable
     private bool _active;
     private bool _warnedNoPermission;
 
+    // Hotkey recording ("Record…" in the main window): every key goes here instead of the hotkey logic
+    private Action<ushort[]>? _recordPreview;
+    private Action<ushort[]?>? _recordDone;
+    private readonly HashSet<ushort> _recordHeld = [];
+    private readonly List<ushort> _recordAll = [];
+
     public bool SuppressKey { get; set; }
     public bool IsInstalled => _tap != IntPtr.Zero;
 
@@ -92,8 +98,10 @@ internal sealed unsafe class HotkeyTap : IDisposable
         _context = context;
         _instance = this;
         _retry = new System.Threading.Timer(_ => _context.Post(_ => TryInstall(), null), null, Timeout.Infinite, Timeout.Infinite);
-        TryInstall();
     }
+
+    /// <summary>Installs the tap (or starts retrying until Accessibility is allowed); call after subscribing to the events.</summary>
+    public void Start() => TryInstall();
 
     private void TryInstall()
     {
@@ -125,9 +133,43 @@ internal sealed unsafe class HotkeyTap : IDisposable
 
     public void SetHotkey(ushort[] keys)
     {
+        // Config reloads happen any time (e.g. an editor autosave); a held hotkey must keep its release
+        if (keys.SequenceEqual(_keys))
+            return;
         _keys = keys;
         _active = false;
     }
+
+    /// <summary>
+    /// Captures the next key combination: <paramref name="preview"/> gets the keys pressed so far,
+    /// <paramref name="done"/> the combination once all keys are released, or null on Esc / <see cref="CancelRecording"/>.
+    /// Captured keys are swallowed. Both callbacks are posted to the context.
+    /// </summary>
+    public void BeginRecording(Action<ushort[]> preview, Action<ushort[]?> done)
+    {
+        _recordHeld.Clear();
+        _recordAll.Clear();
+        _recordPreview = preview;
+        _recordDone = done;
+        _active = false;
+    }
+
+    public void CancelRecording() => EndRecording(null);
+
+    private void EndRecording(ushort[]? keys)
+    {
+        var done = _recordDone;
+        _recordPreview = null;
+        _recordDone = null;
+        if (done != null)
+            _context.Post(_ => done(keys), null);
+    }
+
+    /// <summary>Config form ("LeftControl+LeftCommand"), modifiers first.</summary>
+    public static string ToConfigString(IEnumerable<ushort> keys) =>
+        string.Join("+", keys
+            .OrderBy(k => ModifierMasks.ContainsKey(k) ? 0 : 1)
+            .Select(k => KeyCodes.First(e => e.Value == k).Key));
 
     /// <summary>Parses "RightOption", "LeftControl+LeftCommand", "Ctrl+Cmd", "LControlKey+LWin" etc. into key codes.</summary>
     public static ushort[] ParseHotkey(string text)
@@ -192,7 +234,11 @@ internal sealed unsafe class HotkeyTap : IDisposable
             return evt;
         }
 
-        if (_keys.Length == 0 || CGEventGetIntegerValueField(evt, kCGEventSourceUserData) == InjectedMarker)
+        if (CGEventGetIntegerValueField(evt, kCGEventSourceUserData) == InjectedMarker)
+            return evt;
+        if (_recordDone != null)
+            return Record(type, evt);
+        if (_keys.Length == 0)
             return evt;
 
         var code = (ushort)CGEventGetIntegerValueField(evt, kCGKeyboardEventKeycode);
@@ -239,6 +285,46 @@ internal sealed unsafe class HotkeyTap : IDisposable
         }
 
         return evt;
+    }
+
+    private IntPtr Record(uint type, IntPtr evt)
+    {
+        var code = (ushort)CGEventGetIntegerValueField(evt, kCGKeyboardEventKeycode);
+        bool isDown;
+        if (type == kCGEventFlagsChanged)
+        {
+            if (!ModifierMasks.TryGetValue(code, out var bit))
+                return evt;
+            isDown = (CGEventGetFlags(evt) & bit) != 0;
+        }
+        else
+        {
+            isDown = type == kCGEventKeyDown;
+        }
+
+        if (isDown && code == 53) // Esc
+        {
+            EndRecording(null);
+            return IntPtr.Zero;
+        }
+        if (!KeyCodes.ContainsValue(code))
+            return IntPtr.Zero; // letters and other keys that cannot be a push-to-talk key
+
+        if (isDown)
+        {
+            if (_recordHeld.Add(code) && !_recordAll.Contains(code))
+            {
+                _recordAll.Add(code);
+                var preview = _recordPreview;
+                var snapshot = _recordAll.ToArray();
+                _context.Post(_ => preview?.Invoke(snapshot), null);
+            }
+        }
+        else if (_recordHeld.Remove(code) && _recordHeld.Count == 0 && _recordAll.Count > 0)
+        {
+            EndRecording(_recordAll.ToArray());
+        }
+        return IntPtr.Zero;
     }
 
     /// <summary>

@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace WhisperLocal.Mac.Interop;
 
-/// <summary>C APIs of CoreFoundation, CoreGraphics (events), ApplicationServices, CoreAudio/AudioToolbox and libdispatch.</summary>
+/// <summary>C APIs of CoreFoundation, CoreGraphics (events), ApplicationServices and CoreAudio/AudioToolbox.</summary>
 internal static unsafe class MacNative
 {
     private const string CoreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
@@ -10,7 +10,6 @@ internal static unsafe class MacNative
     private const string ApplicationServices = "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices";
     private const string AudioToolbox = "/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox";
     private const string CoreAudio = "/System/Library/Frameworks/CoreAudio.framework/CoreAudio";
-    private const string LibSystem = "/usr/lib/libSystem.dylib";
 
     // CoreFoundation
     [DllImport(CoreFoundation)] public static extern void CFRelease(IntPtr cf);
@@ -139,17 +138,6 @@ internal static unsafe class MacNative
     [DllImport(CoreAudio)]
     public static extern int AudioObjectGetPropertyData(uint objectId, in AudioObjectPropertyAddress address,
         uint qualifierSize, IntPtr qualifier, ref uint dataSize, void* data);
-
-    // libdispatch / pthread
-    [DllImport(LibSystem)] public static extern void dispatch_async_f(IntPtr queue, IntPtr context, delegate* unmanaged<IntPtr, void> work);
-    [DllImport(LibSystem)] public static extern void dispatch_sync_f(IntPtr queue, IntPtr context, delegate* unmanaged<IntPtr, void> work);
-    [DllImport(LibSystem)] public static extern int pthread_main_np();
-
-    private static readonly Lazy<IntPtr> MainQueue = new(() =>
-        NativeLibrary.GetExport(NativeLibrary.Load(LibSystem), "_dispatch_main_q"));
-
-    /// <summary>dispatch_get_main_queue() is a macro for &amp;_dispatch_main_q.</summary>
-    public static IntPtr DispatchMainQueue => MainQueue.Value;
 
     public static void LoadFramework(string name) =>
         NativeLibrary.Load($"/System/Library/Frameworks/{name}.framework/{name}");

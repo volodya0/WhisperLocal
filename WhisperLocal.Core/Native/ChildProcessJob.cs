@@ -8,7 +8,9 @@ namespace WhisperLocal.Native;
 /// <summary>
 /// Keeps child processes (whisper-server) from outliving WhisperLocal.
 /// Windows: a job object with KILL_ON_JOB_CLOSE, so even a crash takes them down.
-/// Elsewhere: the pid is remembered in a file and a leftover from a crashed run is killed on the next start.
+/// Elsewhere: each child is remembered in a file with the pid of the WhisperLocal process that started it;
+/// children whose owner is gone (a crashed run) are killed on the next start. Children of a live WhisperLocal
+/// process (e.g. the menu bar app while --batch runs) are left alone.
 /// </summary>
 internal static class ChildProcessJob
 {
@@ -17,11 +19,12 @@ internal static class ChildProcessJob
 
     private static string PidFile => Path.Combine(AppPaths.DataDir, "child-processes.pid");
 
-    public static void Add(Process process)
+    /// <param name="name">Process name of the child (its file name without extension), checked before killing it later.</param>
+    public static void Add(Process process, string name)
     {
         if (!OperatingSystem.IsWindows())
         {
-            Remember(process);
+            Remember(process.Id, name);
             return;
         }
         var job = Job.Value;
@@ -36,8 +39,7 @@ internal static class ChildProcessJob
             return;
         lock (Sync)
         {
-            var lines = ReadPidFile().Where(e => e.Pid != processId).Select(e => $"{e.Pid} {e.Name}").ToList();
-            WritePidFile(lines);
+            WritePidFile(ReadPidFile().Where(e => e.Pid != processId).ToList());
         }
     }
 
@@ -48,8 +50,14 @@ internal static class ChildProcessJob
             return;
         lock (Sync)
         {
-            foreach (var (pid, name) in ReadPidFile())
+            var keep = new List<(int Pid, int Owner, string Name)>();
+            foreach (var (pid, owner, name) in ReadPidFile())
             {
+                if (IsAlive(owner))
+                {
+                    keep.Add((pid, owner, name));
+                    continue;
+                }
                 try
                 {
                     using var p = Process.GetProcessById(pid);
@@ -69,30 +77,46 @@ internal static class ChildProcessJob
                     Log.Warn($"Failed to kill leftover process {pid}: {ex.Message}");
                 }
             }
-            WritePidFile([]);
+            WritePidFile(keep);
         }
     }
 
-    private static void Remember(Process process)
+    private static void Remember(int pid, string name)
     {
         lock (Sync)
         {
-            var lines = ReadPidFile().Select(e => $"{e.Pid} {e.Name}").ToList();
-            lines.Add($"{process.Id} {process.ProcessName}");
-            WritePidFile(lines);
+            var entries = ReadPidFile();
+            entries.Add((pid, Environment.ProcessId, name));
+            WritePidFile(entries);
         }
     }
 
-    private static List<(int Pid, string Name)> ReadPidFile()
+    private static bool IsAlive(int pid)
+    {
+        if (pid == Environment.ProcessId)
+            return true;
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return !p.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Lines "child-pid owner-pid name".</summary>
+    private static List<(int Pid, int Owner, string Name)> ReadPidFile()
     {
         try
         {
             if (!File.Exists(PidFile))
                 return [];
             return File.ReadAllLines(PidFile)
-                .Select(l => l.Split(' ', 2))
-                .Where(p => p.Length == 2 && int.TryParse(p[0], out _))
-                .Select(p => (int.Parse(p[0]), p[1]))
+                .Select(l => l.Split(' ', 3))
+                .Where(p => p.Length == 3 && int.TryParse(p[0], out _) && int.TryParse(p[1], out _))
+                .Select(p => (int.Parse(p[0]), int.Parse(p[1]), p[2]))
                 .ToList();
         }
         catch (IOException)
@@ -101,14 +125,14 @@ internal static class ChildProcessJob
         }
     }
 
-    private static void WritePidFile(List<string> lines)
+    private static void WritePidFile(List<(int Pid, int Owner, string Name)> entries)
     {
         try
         {
-            if (lines.Count == 0)
+            if (entries.Count == 0)
                 File.Delete(PidFile);
             else
-                File.WriteAllLines(PidFile, lines);
+                File.WriteAllLines(PidFile, entries.Select(e => $"{e.Pid} {e.Owner} {e.Name}"));
         }
         catch (IOException ex)
         {

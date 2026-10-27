@@ -2,7 +2,8 @@
 
   <!--
     macOS menu bar app. Plain net8.0 with direct AppKit/CoreGraphics/AudioToolbox interop, so it builds
-    with the .NET SDK alone (no Xcode, no macOS workload). scripts/build-mac.sh wraps it into WhisperLocal.app.
+    with the .NET SDK alone (no Xcode, no macOS workload); the windows come from WhisperLocal.Ui (Avalonia).
+    scripts/build-mac.sh wraps it into WhisperLocal.app.
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -17,8 +18,19 @@
     <Description>Local push-to-talk dictation (whisper.cpp, Metal)</Description>
   </PropertyGroup>
 
+  <!-- "owner/repo" whose GitHub releases "Check for Updates" looks at; set by scripts/build-mac.sh -->
+  <ItemGroup Condition="'$(UpdateRepository)' != ''">
+    <AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\WhisperLocal.Core\WhisperLocal.Core.csproj" />
+    <ProjectReference Include="..\WhisperLocal.Ui\WhisperLocal.Ui.csproj" />
+  </ItemGroup>
+
+  <!-- Avalonia runs the app (the shared windows); the menu bar item, indicator, hotkey, audio and paste stay native -->
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
   </ItemGroup>
 
   <!-- whisper-server built by scripts/build-mac.sh (Runtime/whisper/* → <output>/whisper/*), not in git -->

@@ -18,7 +18,14 @@ internal static class LaunchAgent
 
         if (enabled)
         {
-            var plist = BuildPlist(Environment.ProcessPath ?? throw new InvalidOperationException("Executable path is unknown"));
+            var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Executable path is unknown");
+            // Started from the DMG or quarantined in Downloads (App Translocation): the path is gone after a restart
+            if (executable.StartsWith("/Volumes/", StringComparison.Ordinal) || executable.Contains("/AppTranslocation/", StringComparison.Ordinal))
+            {
+                Log.Warn($"Not enabling start at login from a temporary location ({executable}); move WhisperLocal to Applications");
+                return;
+            }
+            var plist = BuildPlist(executable);
             if (current != plist)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);

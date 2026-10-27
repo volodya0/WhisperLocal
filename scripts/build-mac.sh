@@ -10,6 +10,11 @@
 #   scripts/build-mac.sh --install        # also copies it to ~/Applications
 #   scripts/build-mac.sh --dmg            # also packs it into artifacts/WhisperLocal-<arch>.dmg (drag to Applications)
 #   WHISPER_CPP_TAG=v1.9.5 scripts/build-mac.sh --rebuild-whisper
+#
+# Environment:
+#   VERSION             app version, e.g. 1.1.0 (CI passes the release tag); default: the project's <Version>
+#   UPDATE_REPOSITORY   GitHub "owner/repo" whose releases "Check for Updates" uses; default: the git remote origin
+#   CODESIGN_IDENTITY   signing identity; default: ad hoc
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -65,16 +70,28 @@ else
 fi
 
 # 2. .NET app
-echo "==> Publishing WhisperLocal.Mac ($RID)"
+if [[ -z "${UPDATE_REPOSITORY:-}" ]]; then
+    # git@github.com:owner/repo.git or https://github.com/owner/repo(.git) → owner/repo
+    UPDATE_REPOSITORY="$(git -C "$REPO" remote get-url origin 2>/dev/null \
+        | sed -nE 's#^(git@github\.com:|https://github\.com/)([^/]+/[^/]+)$#\2#p' | sed -E 's/\.git$//')"
+fi
+PUBLISH_ARGS=(-p:DebugType=none "-p:UpdateRepository=${UPDATE_REPOSITORY:-}")
+if [[ -n "${VERSION:-}" ]]; then
+    PUBLISH_ARGS+=("-p:Version=$VERSION")
+fi
+echo "==> Publishing WhisperLocal.Mac ($RID, version ${VERSION:-from project}, updates from ${UPDATE_REPOSITORY:-nowhere})"
 rm -rf "$WORK/publish"
 dotnet publish "$REPO/WhisperLocal.Mac/WhisperLocal.Mac.csproj" -c Release -r "$RID" --self-contained true \
-    -p:DebugType=none -o "$WORK/publish"
+    "${PUBLISH_ARGS[@]}" -o "$WORK/publish"
 
 # 3. .app bundle
 echo "==> Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$REPO/WhisperLocal.Mac/Info.plist" "$APP/Contents/Info.plist"
+if [[ -n "${VERSION:-}" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
+fi
 cp "$REPO/WhisperLocal.Mac/Resources/AppIcon.icns" "$APP/Contents/Resources/"
 cp -R "$WORK/publish/." "$APP/Contents/MacOS/"
 chmod +x "$APP/Contents/MacOS/WhisperLocal" "$APP/Contents/MacOS/whisper/whisper-server"

@@ -62,9 +62,21 @@ Same pipeline, macOS-native pieces: CGEventTap hotkey → AudioQueue capture (16
    - **Microphone**: asked on the first dictation.
 5. Hold **Left Control + Left Command**, speak, release.
 
-A **setup window** opens at launch when something is missing (and from the menu, or by opening WhisperLocal
-from Applications again): Accessibility, microphone, whisper-server and the model, each with a button to fix it,
-including an in-app model download.
+The **main window** opens at launch when something is missing (and from the menu, or by opening WhisperLocal
+from Applications again):
+- setup checklist (Accessibility, microphone, whisper-server, model) with buttons to fix each, including an in-app
+  model download;
+- hotkey selector: presets, or "Record…" to hold any combination (saved into the config, comments kept);
+- whether the model is in memory, with Unload / Load;
+- buttons for the config, the log, the logs and data folders;
+- statistics for today, the last 7 days and all time: dictations, words, speaking time and speaking rate
+  (`stats.json` in the data folder, never trimmed; only dictations that produced text count);
+- recent dictations with recording, processing and recognition times, word counts and averages
+  (`history.jsonl` in the data folder; the text is kept only with `Logging.LogText`).
+
+The indicator at the bottom of the screen counts seconds while recording and processing, then shows a summary
+(recording time, processing time, words) for 2 seconds — longer while the mouse is over it — with a **Text**
+button that opens the transcript with a Copy button ("Show Last Transcript" in the menu does the same).
 
 macOS specifics:
 
@@ -74,6 +86,11 @@ macOS specifics:
 - Hotkey names: `LeftControl`, `RightControl`, `LeftOption`, `RightOption`, `LeftCommand`, `RightCommand`,
   `LeftShift`, `RightShift`, `Fn`, `F1`…`F20`; the Windows names (`LControlKey+LWin`, `RMenu`…) map to the
   Mac keys in the same place. For `Fn`, set System Settings → Keyboard → "Press 🌐 key to" → "Do Nothing".
+- Updates are manual: "Check for Updates…" (menu and setup window) looks at the GitHub releases of the repository
+  the app was built from and, after asking, downloads the DMG, checks its checksum and signer, replaces the app and
+  restarts. To publish one, create a release with a tag like `v1.1.0`; the macOS workflow builds and attaches the DMG.
+  With the `MACOS_CERT_P12` / `MACOS_CERT_PASSWORD` secrets (a self-signed code signing certificate is enough) every
+  build carries the same signature, so the Accessibility permission survives updates.
 - `StartWithWindows` means "start at login" here: a LaunchAgent in `~/Library/LaunchAgents`.
 - The build is signed ad hoc, so every rebuild looks like a new app to macOS and the Accessibility switch
   stops working: remove WhisperLocal from the list with "–" and add it again. Building with
@@ -90,6 +107,7 @@ WhisperLocal\                       repository
   scripts\get-model.ps1             downloads and verifies a Whisper model
   scripts/build-mac.sh, get-model.sh  macOS: builds WhisperLocal.app / downloads the model
   WhisperLocal.Core\                platform-neutral: config, pipeline, whisper-server client, filters, LLM, batch
+  WhisperLocal.Ui\                  shared windows (Avalonia): main window, transcript; platforms implement IAppHost
   WhisperLocal.Mac\                 macOS menu bar app (AppKit/CoreGraphics/AudioToolbox interop), own config.json
   WhisperLocal\                     Windows tray app
     config.json                     settings (copied to the output on build)

@@ -4,8 +4,8 @@ using static WhisperLocal.Mac.Interop.ObjC;
 namespace WhisperLocal.Mac.Ui;
 
 /// <summary>
-/// One Objective-C object that receives everything AppKit calls back with: menu item and button clicks
-/// (dispatched by the sender's tag), the menu delegate, the window delegate and the application delegate.
+/// One Objective-C object that receives AppKit callbacks of the native parts: menu item and button clicks
+/// (dispatched by the sender's tag) and the menu delegate. Avalonia owns the application and window delegates.
 /// </summary>
 internal static class ActionTarget
 {
@@ -16,10 +16,6 @@ internal static class ActionTarget
     public static IntPtr ActionSelector => Sel("performAction:");
 
     public static event Action? MenuWillOpen;
-    public static event Action? WindowWillClose;
-
-    /// <summary>The app was opened again (Finder, Launchpad, Spotlight) while already running.</summary>
-    public static event Action? Reopen;
 
     public static unsafe IntPtr Instance
     {
@@ -30,9 +26,6 @@ internal static class ActionTarget
             var cls = objc_allocateClassPair(Class("NSObject"), "WhisperLocalActionTarget", 0);
             class_addMethod(cls, Sel("performAction:"), (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&OnAction, "v@:@");
             class_addMethod(cls, Sel("menuWillOpen:"), (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&OnMenuWillOpen, "v@:@");
-            class_addMethod(cls, Sel("windowWillClose:"), (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&OnWindowWillClose, "v@:@");
-            class_addMethod(cls, Sel("applicationShouldHandleReopen:hasVisibleWindows:"),
-                (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, byte, byte>)&OnReopen, "c@:@c");
             objc_registerClassPair(cls);
             _instance = Send(Send(cls, Sel("alloc")), Sel("init"));
             return _instance;
@@ -61,16 +54,6 @@ internal static class ActionTarget
 
     [UnmanagedCallersOnly]
     private static void OnMenuWillOpen(IntPtr self, IntPtr sel, IntPtr menu) => Guard("Menu update", () => MenuWillOpen?.Invoke());
-
-    [UnmanagedCallersOnly]
-    private static void OnWindowWillClose(IntPtr self, IntPtr sel, IntPtr notification) => Guard("Window close", () => WindowWillClose?.Invoke());
-
-    [UnmanagedCallersOnly]
-    private static byte OnReopen(IntPtr self, IntPtr sel, IntPtr app, byte hasVisibleWindows)
-    {
-        Guard("Reopen", () => Reopen?.Invoke());
-        return 1;
-    }
 
     // An exception escaping into native code would kill the process
     private static void Guard(string what, Action action)
