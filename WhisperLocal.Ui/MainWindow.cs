@@ -9,6 +9,7 @@ using WhisperLocal.Config;
 using WhisperLocal.Llm;
 using WhisperLocal.Pipeline;
 using WhisperLocal.Stt;
+using WhisperLocal.Updates;
 
 namespace WhisperLocal.Ui;
 
@@ -20,6 +21,9 @@ namespace WhisperLocal.Ui;
 public sealed class MainWindow : Window
 {
     private const int HistoryRows = 3;
+
+    // Builds without the CI's -p:UpdateRepository still link to the project
+    private static readonly string RepositoryUrl = $"https://github.com/{GitHubReleases.Repository ?? "volodya0/WhisperLocal"}";
 
     private readonly IAppHost _host;
     private readonly TranscriptWindow _transcript;
@@ -210,6 +214,7 @@ public sealed class MainWindow : Window
             Children =
             {
                 DarkTheme.Label($"v{_host.VersionText}", 12, brush: DarkTheme.Subtle),
+                DarkTheme.Button("GitHub", () => _host.OpenPath(RepositoryUrl), small: true),
                 DarkTheme.Button("Check for Updates", _host.CheckForUpdates, small: true),
             },
         };

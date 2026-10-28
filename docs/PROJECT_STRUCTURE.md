@@ -115,6 +115,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Ui/RecordingOverlay.cs` | Click-through "Recording / Processing" indicator at the bottom of the screen. |
 | `Ui/TrayIcons.cs` | Tray icons drawn at runtime (waveform on a coloured square per state); also the windows' icon. |
 | `Updates/Updater.cs` | "Check for Updates" on Windows: downloads the zip and, once the app has quit, copies it over the app folder (keeping `config.json`) and restarts. |
+| `Resources/AppIcon.ico` | The exe's icon (Explorer, taskbar, Alt+Tab, Start). |
 | `Ui/SharedUi.cs` | Sets up Avalonia without its own run loop, so the shared windows run on the WinForms message loop. |
 | `Runtime/whisper/*` | Bundled whisper.cpp Vulkan build (`whisper-server.exe` and DLLs); `VERSION.md` says which version. |
 
@@ -152,7 +153,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 |---|---|
 | `build-mac.sh` | Builds whisper-server and llama-server with Metal, publishes the app, assembles and signs `WhisperLocal.app`; `--install`, `--dmg`. |
 | `get-model.sh` / `get-model.ps1` | Download a Whisper model with hash check (macOS / Windows). |
-| `make-mac-icons.py` | Generates the macOS app and menu bar icons from the tray icon design. |
+| `make-mac-icons.py` | Generates the macOS app and menu bar icons and the Windows app icon from the tray icon design. |
 
 ## Where things are stored at runtime
 

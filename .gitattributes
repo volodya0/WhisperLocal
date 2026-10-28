@@ -12,4 +12,5 @@
 *.exe binary
 *.bin binary
 *.icns binary
+*.ico binary
 *.png binary

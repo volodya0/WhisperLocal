@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Windows: WhisperLocal.exe has the waveform app icon (Explorer, taskbar, Alt+Tab, Start) instead of the default one.
+- Main window: a GitHub button next to Check for Updates opens the project's page.
 - Windows: the shared main window (setup checklist with model download, hotkey selector with Record…, language,
   speech model and memory, recent dictations), history, statistics and transcript windows; "Open WhisperLocal…" and
   "Show Last Transcript" in the tray menu (double-click the icon for the main window). Dictations are kept in the

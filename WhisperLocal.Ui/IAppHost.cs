@@ -48,7 +48,7 @@ public interface IAppHost
 
     void CheckForUpdates();
 
-    /// <summary>Opens a file or folder; <paramref name="textEditor"/> forces a text editor.</summary>
+    /// <summary>Opens a file, folder or web address; <paramref name="textEditor"/> forces a text editor.</summary>
     void OpenPath(string path, bool textEditor = false);
 
     /// <summary>The main window was shown or hidden (macOS brings the app to the front when it is shown).</summary>

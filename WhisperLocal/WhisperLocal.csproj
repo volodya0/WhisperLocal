@@ -11,6 +11,8 @@
     <Version>1.0.0</Version>
     <Product>WhisperLocal</Product>
     <Description>Local push-to-talk dictation (whisper.cpp, Vulkan)</Description>
+    <!-- The exe's icon (Explorer, taskbar, Alt+Tab, Start); drawn by scripts/make-mac-icons.py -->
+    <ApplicationIcon>Resources\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!--

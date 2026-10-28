@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Draws the macOS icons from the Windows tray icon design (WhisperLocal/Ui/TrayIcons.cs):
+Draws the app icons from the Windows tray icon design (WhisperLocal/Ui/TrayIcons.cs):
 five waveform bars on a dark rounded square.
+
+  WhisperLocal/Resources/AppIcon.ico               Windows app icon (exe, taskbar, Alt+Tab), 16–256 px
 
   WhisperLocal.Mac/Resources/AppIcon.icns          app icon (Finder, Dock), macOS icon grid
   WhisperLocal.Mac/Resources/MenuBarIcon.png       menu bar template image (bars only, 36 px = 18 pt @2x)
@@ -20,7 +22,9 @@ from PIL import Image, ImageDraw
 # Same relative bar heights as TrayIcons.BarHeights
 BAR_HEIGHTS = [0.4, 0.75, 1.0, 0.6, 0.35]
 BACKGROUND = (32, 33, 36, 255)  # TrayIcons.Idle
-OUT = Path(__file__).resolve().parent.parent / "WhisperLocal.Mac" / "Resources"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "WhisperLocal.Mac" / "Resources"
+WINDOWS_OUT = ROOT / "WhisperLocal" / "Resources"
 SUPERSAMPLE = 4
 
 
@@ -48,6 +52,22 @@ def app_icon(px):
     d.rounded_rectangle((off, off, off + body, off + body), radius=body * 0.225, fill=BACKGROUND)
     draw_bars(d, (off, off, body), (255, 255, 255, 255))
     return img.resize((px, px), Image.LANCZOS)
+
+
+def windows_icon(px):
+    """Windows icons fill their square, like the tray icon: the rounded square edge to edge."""
+    s = px * SUPERSAMPLE
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle((0, 0, s - 1, s - 1), radius=s * 0.22, fill=BACKGROUND)
+    draw_bars(d, (0, 0, s), (255, 255, 255, 255))
+    return img.resize((px, px), Image.LANCZOS)
+
+
+def write_ico(path):
+    sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
+    images = [windows_icon(px) for px in sizes]
+    images[-1].save(path, format="ICO", sizes=[(px, px) for px in sizes], append_images=images[:-1])
 
 
 def menu_bar_icon(px, color):
@@ -87,7 +107,9 @@ def main():
     # macOS systemRed / systemOrange, as on the Windows tray icon's recording/processing states
     menu_bar_icon(36, (255, 59, 48, 255)).save(OUT / "MenuBarIconRecording.png")
     menu_bar_icon(36, (255, 149, 0, 255)).save(OUT / "MenuBarIconProcessing.png")
-    print(f"Written to {OUT}")
+    WINDOWS_OUT.mkdir(parents=True, exist_ok=True)
+    write_ico(WINDOWS_OUT / "AppIcon.ico")
+    print(f"Written to {OUT} and {WINDOWS_OUT}")
 
 
 if __name__ == "__main__":
