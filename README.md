@@ -2,210 +2,114 @@
 
 *Українською: [README.uk.md](README.uk.md)*
 
-Local push-to-talk dictation for Windows and macOS (Wispr Flow–style): hold a hotkey, speak, release —
-the recognized text is pasted into the active window. Everything runs locally and portably on the GPU
-(bundled whisper.cpp Vulkan build on Windows, Metal on macOS); nothing is installed or auto-updated.
+Dictation that stays on your computer. Hold a key, speak, release — the text appears in whatever app you are typing
+in. Speech recognition (Whisper) runs locally on your GPU: no account, no subscription, no audio sent anywhere.
+Tuned for Ukrainian with English terms, and works for English too.
 
-```
-Hotkey (WH_KEYBOARD_LL) → WASAPI capture → 16 kHz mono
-  → whisper-server (bundled child process, HTTP /inference)
-  → hallucination filter + regex dictionary
-  → optional LLM cleanup (disabled by default)
-  → clipboard + Ctrl+V, clipboard restored
-```
+## Install
 
-## Setting up on a new PC
+### macOS (Apple Silicon, macOS 12 or later)
 
-1. Install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and a current GPU driver (Vulkan is part of AMD/NVIDIA/Intel drivers).
-2. Clone and build:
-   ```
-   git clone <repo-url> WhisperLocal
-   cd WhisperLocal
-   dotnet build WhisperLocal.sln -c Release
-   ```
-3. Download the model (~3 GB, SHA256-verified) into `models\` next to the exe:
-   ```
-   powershell -ExecutionPolicy Bypass -File scripts\get-model.ps1 -Configuration Release
-   ```
-   Without it the app shows a "model not found" dialog with the exact folder and download link.
-4. Run `WhisperLocal\bin\Release\net8.0-windows\WhisperLocal.exe`.
-5. If the PC has several GPUs, check the Vulkan device list at the top of `logs\whisper-server.log` next to the exe
-   and set `-dev N` in `Whisper.ExtraArgs`.
+1. Download the latest `.dmg` from [Releases](https://github.com/volodya0/WhisperLocal/releases/latest).
+2. Open it and drag **WhisperLocal** to Applications.
+3. Start it. If macOS says it cannot verify the developer, open System Settings → Privacy & Security and click
+   **Open Anyway**.
 
-Settings come with the repository (`WhisperLocal\config.json`), nothing to copy.
-The whisper.cpp binaries are in the repository (`WhisperLocal\Runtime\whisper`, see `VERSION.md` there);
-the Vulkan build is vendor-neutral, no rebuild is needed for a different GPU.
+WhisperLocal lives in the menu bar (the waveform icon); it has no Dock icon.
 
-## macOS
+### Windows
 
-Same pipeline, macOS-native pieces: CGEventTap hotkey → AudioQueue capture (16 kHz mono) → whisper-server (Metal)
-→ filters → pasteboard + Cmd+V. A menu bar app (no Dock icon); Apple Silicon or Intel, macOS 12+.
+A ready-to-run download is coming. For now WhisperLocal is built from source: see
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#windows). It needs a GPU with a current driver (AMD, NVIDIA or Intel).
 
-1. Install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), the Xcode Command Line Tools
-   (`xcode-select --install`) and CMake (`brew install cmake`).
-2. Build whisper-server and llama-server (grammar check) with Metal, and the app bundle:
-   ```
-   scripts/build-mac.sh --install        # → artifacts/WhisperLocal.app, copied to ~/Applications
-   scripts/build-mac.sh --dmg            # or a drag-to-Applications disk image to share
-   ```
-   The first run builds whisper.cpp and llama.cpp (pinned tags, see the script) into `WhisperLocal.Mac/Runtime`, not in git.
-   Already have `brew install whisper-cpp`? Set `Whisper.ServerExe` to `"whisper-server"` and it is found in PATH.
-   Prebuilt DMGs: every push builds one on GitHub (Actions → "macOS build" → Artifacts); tags `v*` attach it to the release.
-3. Download the model into `~/Library/Application Support/WhisperLocal/models`:
-   ```
-   scripts/get-model.sh
-   ```
-   `ggml-large-v3-turbo.bin` is noticeably faster on base M-series chips and 8 GB Macs.
-4. Start WhisperLocal from ~/Applications and grant the permissions it asks for:
-   - **Accessibility** (System Settings → Privacy & Security → Accessibility): the global hotkey and the Cmd+V paste.
-     The hotkey starts working as soon as it is allowed, no restart needed.
-   - **Microphone**: asked on the first dictation.
-5. Hold **Left Control + Left Command**, speak, release.
+## First launch (macOS)
 
-The **main window** opens at launch when something is missing (and from the menu, or by opening WhisperLocal
-from Applications again):
-- setup checklist (Accessibility, microphone, whisper-server, model) with buttons to fix each, including an in-app
-  model download;
-- hotkey selector: presets, or "Record…" to hold any combination (saved into the config, comments kept);
-- language: Ukrainian + English (detected per dictation, the default on macOS), Ukrainian + English + Russian,
-  Ukrainian only, English only or any (`Whisper.Language`: `"uk,en"`, `"uk,en,ru"`, `"uk"`, `"en"`, `"auto"`; any list of
-  codes works, the first is the fallback). A single fixed language makes Whisper write speech in
-  another language translated into it;
-- speech model: Large v3 (most accurate) or Large v3 Turbo (several times faster, almost as accurate; best on
-  smaller Macs), downloaded from Setup; whether it is in memory, with Unload / Load;
-- language model: grammar check on/off, the model (Gemma 3 4B,
-  Gemma 3 12B or Qwen 3 4B) with an in-app download, and whether it is loaded;
-- buttons for the config, the log, the logs and data folders;
-- the last 3 dictations with recording, processing and recognition times and word counts;
-- All history opens a window with every kept dictation, grouped by day, with averages
-  (the last 20 in `history.jsonl` in the data folder; the text is kept only with `Logging.LogText`);
-- Statistics opens a window with today, the last 7 days and all time: dictations, words, speaking time and speaking
-  rate (`stats.json` in the data folder, never trimmed; only dictations that produced text count).
+The main window opens with a short setup checklist. Fix each line with the button next to it:
 
-The indicator at the bottom of the screen counts seconds while recording and processing, then shows a summary
-(recording time, processing time, words) for 3 seconds (`Ui.ResultSeconds`) — longer while the mouse is over it — with a **Text**
-button that opens the transcript with a Copy button ("Show Last Transcript" in the menu does the same). When no text
-input is focused (a file list in Finder, the desktop), nothing is pasted: the transcript opens instead, editable, to
-copy (`Insert.ShowWhenNoTextField`).
+- **Accessibility** — needed for the hotkey and for pasting. Turn WhisperLocal on in System Settings →
+  Privacy & Security → Accessibility; the hotkey works as soon as it is allowed.
+- **Microphone** — allow it when asked.
+- **Model** — press **Download** (3.1 GB, or 1.6 GB for the Turbo model). This happens once.
 
-**Grammar check** (off by default): after a dictation is pasted, a local language model rewrites it as correct, natural text
-in the same language, and a panel proposes it with the changed words in green. The icon buttons insert it (replacing
-what was pasted: undo + paste; if you typed or switched apps meanwhile, it is pasted at the cursor instead), copy it,
-or close the panel; it also goes away after 15 s (`Polish.DisplaySeconds`) or with the next dictation.
+When every line is green, the header says *Ready*.
 
-It uses the GGUF model chosen in the main window, downloaded from HuggingFace into the models folder by the
-**Download** button, no Ollama needed. Gemma 3 4B (2.5 GB, about 3 GB of memory while loaded) is the default; it is
-unloaded with the speech model after `Memory.IdleUnloadMinutes`. Settings: the `LocalLlm` and `Polish` sections of
-the config.
+## Dictating
 
-macOS specifics:
+1. Put the cursor where the text should go.
+2. Hold **Left Control + Left Command** (Windows: **Left Ctrl + Left Win**) and speak.
+3. Release. The text is pasted a moment later.
 
-- Config, logs and models live in `~/Library/Application Support/WhisperLocal` ("Show data folder" in the menu),
-  not inside the app. `WhisperLocal.Mac/config.json` is installed there on the first run only; afterwards edit the
-  installed copy ("Open config", hot-reloaded). Delete it to get the project defaults again.
-- Hotkey names: `LeftControl`, `RightControl`, `LeftOption`, `RightOption`, `LeftCommand`, `RightCommand`,
-  `LeftShift`, `RightShift`, `Fn`, `F1`…`F20`, letters, digits, `Slash`, `Comma`, `Period` and other keys
-  (e.g. `LeftOption+Slash` for Option + /; the `/` does not reach the app while the combination is held); the Windows names (`LControlKey+LWin`, `RMenu`…) map to the
-  Mac keys in the same place. For `Fn`, set System Settings → Keyboard → "Press 🌐 key to" → "Do Nothing".
-- Updates are manual: "Check for Updates…" (menu and setup window) looks at the GitHub releases of the repository
-  the app was built from and, after asking, downloads the DMG, checks its checksum and signer, replaces the app and
-  restarts. Every push to `main` is released automatically as `v1.0.<build number>`; a tag like `v1.2.0`
-  is released with that version.
-  With the `MACOS_CERT_P12` / `MACOS_CERT_PASSWORD` secrets (a self-signed code signing certificate is enough) every
-  build carries the same signature, so the Accessibility permission survives updates.
-- `StartWithWindows` means "start at login" here: a LaunchAgent in `~/Library/LaunchAgents`.
-- The build is signed ad hoc, so every rebuild looks like a new app to macOS and the Accessibility switch
-  stops working: remove WhisperLocal from the list with "–" and add it again. Building with
-  `CODESIGN_IDENTITY="<certificate name>" scripts/build-mac.sh` (e.g. a self-signed code signing certificate
-  from Keychain Access) keeps the permission across rebuilds.
-- Notifications are shown through `osascript`, so they appear as coming from Script Editor.
-- For development, `dotnet run --project WhisperLocal.Mac` works too; macOS then asks for the permissions
-  on behalf of the terminal app.
+The indicator at the bottom of the screen counts the seconds while recording and processing, then shows a short
+summary. Its **Text** button opens what you said, to edit and copy. If no text field was focused (the desktop, a
+file list), nothing is pasted — the text opens in that window instead.
 
-## Layout
+- A very short tap is ignored, so the hotkey does not fire by accident.
+- Pressing another key while holding the hotkey cancels the recording.
+- The first dictation after a pause takes a few seconds longer: the model loads while you speak.
 
-```
-WhisperLocal\                       repository
-  scripts\get-model.ps1             downloads and verifies a Whisper model
-  scripts/build-mac.sh, get-model.sh  macOS: builds WhisperLocal.app / downloads the model
-  WhisperLocal.Core\                platform-neutral: config, pipeline, whisper-server client, filters, LLM, batch
-  WhisperLocal.Ui\                  shared windows (Avalonia): main window, transcript; platforms implement IAppHost
-  WhisperLocal.Mac\                 macOS menu bar app (AppKit/CoreGraphics/AudioToolbox interop), own config.json
-  WhisperLocal\                     Windows tray app
-    config.json                     settings (copied to the output on build)
-    Runtime\whisper\                whisper-server.exe + DLLs (Vulkan build)
+## Settings
 
-WhisperLocal\WhisperLocal\bin\<Configuration>\net8.0-windows\     next to the exe
-  WhisperLocal.exe
-  config.json                       copy the app reads
-  whisper\                          copied from Runtime\whisper
-  models\ggml-large-v3.bin          downloaded, not in source control
-  logs\
-```
+Open the main window from the menu bar icon → **Open WhisperLocal…** (or open WhisperLocal from Applications again).
 
-Relative paths in the config (`Whisper.ServerExe`, `Whisper.ModelPath`) are relative to the exe directory
-(on macOS, `ModelPath` is relative to the data folder).
+- **Hotkey** — pick a preset, or press **Record…** and hold any combination you like.
+- **Language** — Ukrainian + English (detected for each dictation) is the default. Other choices: add Russian,
+  Ukrainian only, English only, or any language. With a single language, speech in another language comes out
+  translated into it.
+- **Speech model** — *Large v3* is the most accurate; *Large v3 Turbo* is several times faster and almost as
+  accurate, the better choice for Macs with 8–16 GB of memory. **Unload** frees the memory right away; this also
+  happens by itself after 5 minutes without dictation.
+- **Grammar check** — see below.
+- **Recent dictations** — the last three, with timings. **All history** and **Statistics** (words, speaking time,
+  words per minute) open their own windows.
+- **Files** — open the config file, the log, or the data folder.
 
-## Config
+Everything else (start at login, which microphone, English terms that get misheard…) is in the config file: see
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md). On Windows all settings live there for now: tray icon →
+**Open config**; changes apply as soon as you save.
 
-`WhisperLocal\config.json` in the project is the source of truth and is in source control; the build copies it
-next to the exe (only when the project file is newer), and the app reads that copy. It accepts `//` comments and is
-hot-reloaded on save. Edit the project file and rebuild — edits made to the copy next to the exe
-(e.g. via "Open config") apply immediately but are not in git and are overwritten once the project file changes.
-If the file is missing, the app writes one with defaults. Logs go to `logs\` next to the exe
-(`whisper-server.log` holds the server output).
+## Grammar check (macOS, optional)
 
-Key settings:
+Turn it on in the main window and download its model (Gemma 3 4B, 2.5 GB, is the default). After each dictation, a
+small panel proposes a corrected version with the changed words in green. Its buttons replace what was pasted with
+the corrected text or copy it; or just ignore it — it goes away by itself. It runs locally too.
 
-- `StartWithWindows` — per-user Run registry entry pointing to the exe that applied the setting.
-- `Hotkey.Key` — Keys names joined with `+`: `LControlKey+LWin` (default), `LMenu+LWin`, `RMenu`, `F13`…
-- `Audio.DeviceName` — part of the microphone name; empty = Windows default.
-- `Whisper.ExtraArgs` — defaults to `-dev 0 -sns -t 8` (GPU index, suppress non-speech tokens, threads); add `-bs 5` for beam search.
-- `Memory.IdleUnloadMinutes` — auto-unload after inactivity (default 5).
+## Menu
 
-## English terms in Ukrainian speech
+- **Open WhisperLocal…** — the main window.
+- **Show Last Transcript** — the text of the last dictation.
+- **Check for Updates…** — looks for a new version and, if you agree, installs it and restarts.
+- **Enabled** — pause or resume dictation.
+- **Unload from memory** — free the memory the models use; the next dictation loads them again.
+- **Quit WhisperLocal**.
 
-Two mechanisms, both in the config:
+On Windows the tray menu has Enabled, Unload from memory, Open config, Open log and Exit.
 
-1. **`Whisper.InitialPrompt`** — text Whisper treats as preceding context, so terms listed there tend to be
-   spelled the same way. It is a hint, not a guarantee; keep it short (a long list dilutes it), and do not
-   list words you do not use — they can leak into the text.
-2. **`Dictionary`** — regex replacements applied after recognition, top to bottom, case-insensitive,
-   whole words. `|` separates variants, `\w*` catches Ukrainian endings (`джейсон\w*` → `JSON`).
+## Troubleshooting
 
-Workflow: look at the `raw:` lines in the log, find the misheard form, add a dictionary entry; the config reloads automatically.
+- **The hotkey stopped working after an update.** macOS sometimes forgets the permission for a new version: in
+  System Settings → Privacy & Security → Accessibility, remove WhisperLocal with **–** and add it again.
+- **Fn as the hotkey types emoji or switches the input language.** Set System Settings → Keyboard →
+  "Press 🌐 key to" → **Do Nothing**.
+- **English terms come out wrong.** Teach them in the config: see
+  [English terms](docs/CONFIGURATION.md#english-terms-in-ukrainian-speech).
+- **Nothing is pasted into some Windows apps.** Apps running as administrator do not accept pasting from a normal
+  app; run WhisperLocal as administrator too.
+- **Slow on a Windows PC with two GPUs.** It may be using the integrated one: see
+  [choosing the GPU](docs/CONFIGURATION.md#choosing-the-gpu-windows).
+- Anything else: the log (main window → **Log**, or tray → **Open log**) usually says what went wrong.
 
-## Tray menu
+## Privacy
 
-- **Enabled** — turn dictation on/off.
-- **Unload from memory** — stops all servers and unloads all models to free RAM/VRAM (disabled when nothing is loaded); the next hotkey press starts everything again. Happens automatically after `Memory.IdleUnloadMinutes` without dictation.
-- Open config / Open log, Exit.
+Audio and text never leave your computer. The only network access is downloading models from HuggingFace and,
+when you ask for it, checking GitHub for updates. Recordings are not saved. The log and the dictation history keep
+the text of your dictations to help with troubleshooting; set `Logging.LogText` to `false` in the config to stop
+that.
 
-## Batch evaluation
+Data folder: `~/Library/Application Support/WhisperLocal` on macOS, the app folder on Windows.
 
-```
-WhisperLocal.exe --batch D:\Dictations [--out results.csv] [--config path\config.json]
-```
+## For developers
 
-On macOS: `~/Applications/WhisperLocal.app/Contents/MacOS/WhisperLocal --batch ~/Dictations` (files are decoded with `afconvert`).
-
-Runs every wav/mp3/m4a/flac in the folder through the pipeline and writes a CSV (timings, raw,
-dictionary, final text) plus a readable `.txt` next to it.
-
-## Measured performance
-
-Whisper large-v3, 10–15 s utterances:
-
-| Device | Recognition | Verdict |
-|---|---|---|
-| AMD Radeon RX 6800 XT (Vulkan, `-dev 0`) | ~0.5 s (first request after start ~1.4 s), model start ~2.5 s, ~3.1 GB VRAM | comfortable |
-| CPU only (`-ng`) | noticeably slower | usable as a fallback |
-| Integrated AMD Radeon Graphics (Vulkan, `-dev 1`) | much slower than CPU | not usable |
-
-## Notes
-
-- Exit WhisperLocal before rebuilding: the running exe is locked.
-- The optional LLM cleanup stage talks to an Ollama HTTP API, which is not bundled; it is disabled by default (`Llm.Enabled`).
-- Only the bundled whisper-server is started; if its port is taken by another process, an error is shown.
-- Pasting into elevated windows is blocked by UIPI unless WhisperLocal runs as administrator (a warning is logged).
-- On hotkey press, the servers are started while you speak, so a cold start mostly overlaps with speaking.
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — building, releases, batch evaluation, measured performance.
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — every setting in `config.json`.
+- [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) — how the code is organized, with a note for each file.
+- [CHANGELOG.md](CHANGELOG.md) — what changed.
