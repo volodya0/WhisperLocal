@@ -20,9 +20,30 @@ internal static class TrayIcons
     private static Icon Make(Color background, Color bars)
     {
         // Draw at the native small-icon size of the current DPI to keep the bars crisp
-        var size = Math.Max(16, SystemInformation.SmallIconSize.Width);
+        using var bmp = Draw(Math.Max(16, SystemInformation.SmallIconSize.Width), background, bars);
+        var handle = bmp.GetHicon();
+        try
+        {
+            return (Icon)Icon.FromHandle(handle).Clone();
+        }
+        finally
+        {
+            NativeMethods.DestroyIcon(handle);
+        }
+    }
 
-        using var bmp = new Bitmap(size, size);
+    /// <summary>The idle icon as a PNG of <paramref name="size"/> pixels, for the windows' title bar and taskbar.</summary>
+    public static byte[] AppIconPng(int size)
+    {
+        using var bmp = Draw(size, Color.FromArgb(32, 33, 36), Color.White);
+        using var stream = new MemoryStream();
+        bmp.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+        return stream.ToArray();
+    }
+
+    private static Bitmap Draw(int size, Color background, Color bars)
+    {
+        var bmp = new Bitmap(size, size);
         using (var g = Graphics.FromImage(bmp))
         {
             g.Clear(Color.Transparent);
@@ -59,16 +80,7 @@ internal static class TrayIcons
                 x += barWidth + gap;
             }
         }
-
-        var handle = bmp.GetHicon();
-        try
-        {
-            return (Icon)Icon.FromHandle(handle).Clone();
-        }
-        finally
-        {
-            NativeMethods.DestroyIcon(handle);
-        }
+        return bmp;
     }
 
     private static GraphicsPath RoundedRect(RectangleF r, float radius)

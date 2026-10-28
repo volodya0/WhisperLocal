@@ -87,7 +87,9 @@ With the repository secrets `MACOS_CERT_P12` (base64 of a `.p12` with a code sig
 enough) and `MACOS_CERT_PASSWORD`, every build carries the same signature, so the Accessibility permission survives
 updates. Without them builds are signed ad hoc.
 
-Windows is not built by CI yet.
+`.github/workflows/windows.yml` builds the Windows app on every push to `main` and every pull request, runs its
+`--self-test` (the shared windows start) and keeps a zip of the app folder as a workflow artifact. It is not
+released yet.
 
 ## Batch evaluation
 

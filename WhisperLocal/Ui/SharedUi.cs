@@ -15,6 +15,7 @@ internal static class SharedUi
             .UsePlatformDetect()
             .LogToTrace()
             .SetupWithoutStarting();
+        App.WindowIcon = new Avalonia.Controls.WindowIcon(new MemoryStream(TrayIcons.AppIconPng(64)));
         // A bug in one callback must not take the whole app down
         Dispatcher.UIThread.UnhandledException += (_, e) =>
         {

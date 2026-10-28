@@ -18,7 +18,9 @@
     "Port": 8178,
     "InferencePath": "/inference",
     "ExtraArgs": "-dev 0 -sns -t 8",
-    "Language": "uk",
+    // "uk,en": detect Ukrainian or English per dictation; "uk" forces Ukrainian (English speech would come out
+    // translated into Ukrainian); "auto" detects any language
+    "Language": "uk,en",
     "Temperature": 0,
     // Hint for Whisper: terms listed here are more likely to be written exactly like this (keep it short)
     "InitialPrompt": "Розмова українською з англійськими термінами: Whisper, LLM, README, JSON, GitHub, Visual Studio, Podman, Apache, WireGuard, Nextcloud, mailcow, BLAST, WebGL, deploy, Docker.",

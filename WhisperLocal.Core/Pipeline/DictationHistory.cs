@@ -11,7 +11,10 @@ public sealed record DictationRecord(
 /// <summary>The last dictations with their timings, kept in a small JSON-lines file between runs.</summary>
 public sealed class DictationHistory
 {
-    public const int Keep = 20;
+    public const int Keep = 1000;
+
+    // The file is appended to and trimmed back to Keep only once it is this much longer
+    private const int TrimSlack = 100;
 
     private readonly object _sync = new();
     private readonly string _file;
@@ -48,6 +51,15 @@ public sealed class DictationHistory
         }
     }
 
+    public int Count
+    {
+        get
+        {
+            lock (_sync)
+                return _items.Count;
+        }
+    }
+
     /// <summary>Newest first.</summary>
     public IReadOnlyList<DictationRecord> Recent(int count)
     {
@@ -60,11 +72,17 @@ public sealed class DictationHistory
         lock (_sync)
         {
             _items.Add(record);
-            if (_items.Count > Keep)
-                _items.RemoveRange(0, _items.Count - Keep);
             try
             {
-                File.WriteAllLines(_file, _items.Select(r => JsonSerializer.Serialize(r)));
+                if (_items.Count > Keep + TrimSlack)
+                {
+                    _items.RemoveRange(0, _items.Count - Keep);
+                    File.WriteAllLines(_file, _items.Select(r => JsonSerializer.Serialize(r)));
+                }
+                else
+                {
+                    File.AppendAllLines(_file, [JsonSerializer.Serialize(record)]);
+                }
             }
             catch (IOException ex)
             {

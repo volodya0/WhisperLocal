@@ -78,6 +78,7 @@ public sealed class MainWindow : Window
         _historyWindow = new HistoryWindow(host, transcript);
         _statsWindow = new StatsWindow(host);
         Title = "WhisperLocal";
+        Icon = App.WindowIcon;
         Width = 720;
         Height = 760;
         MinWidth = 600;

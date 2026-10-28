@@ -18,6 +18,7 @@ public sealed class TranscriptWindow : Window
     public TranscriptWindow()
     {
         Title = "Transcript";
+        Icon = App.WindowIcon;
         Width = 520;
         Height = 260;
         MinWidth = 320;

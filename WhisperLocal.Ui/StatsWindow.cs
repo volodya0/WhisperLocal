@@ -18,6 +18,7 @@ public sealed class StatsWindow : Window
     {
         _host = host;
         Title = "Statistics";
+        Icon = App.WindowIcon;
         Width = 560;
         Height = 220;
         MinWidth = 440;

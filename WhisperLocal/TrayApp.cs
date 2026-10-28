@@ -48,6 +48,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     private ForegroundApp? _target;
     private string _lastTranscript = "";
     private Download? _download;
+    private (string? Name, string? Configured, DateTime At) _microphone;
     private bool _disposed;
 
     /// <summary>A model download in progress: what the setup line shows, and how to cancel it.</summary>
@@ -149,9 +150,9 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     {
         var items = new List<SetupItem>();
 
-        var microphones = AudioRecorder.ListDevices();
-        items.Add(microphones.Count > 0
-            ? new SetupItem(SetupState.Ok, "Microphone: " + microphones[0])
+        var microphone = Microphone();
+        items.Add(microphone != null
+            ? new SetupItem(SetupState.Ok, "Microphone: " + microphone)
             : new SetupItem(SetupState.Error, "No microphone found", "Sound Settings", () => OpenPath("ms-settings:sound")));
 
         var server = WhisperServerStt.ResolveServerExe(_config.Current.Whisper.ServerExe);
@@ -171,6 +172,15 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
 
         items.Add(new SetupItem(SetupState.Ok, $"Hotkey: hold {KeyboardHook.Describe(_config.Current.Hotkey.Key)} to dictate"));
         return items;
+    }
+
+    /// <summary>The microphone dictation would use; looked up at most every few seconds (the window refreshes often).</summary>
+    private string? Microphone()
+    {
+        var configured = _config.Current.Audio.DeviceName;
+        if (configured != _microphone.Configured || DateTime.UtcNow - _microphone.At > TimeSpan.FromSeconds(5))
+            _microphone = (AudioRecorder.ResolveDeviceName(configured), configured, DateTime.UtcNow);
+        return _microphone.Name;
     }
 
     public IReadOnlyList<SetupItem> GetLanguageModelItems() => [];

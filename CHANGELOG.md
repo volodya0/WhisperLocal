@@ -7,6 +7,10 @@
   "Show Last Transcript" in the tray menu (double-click the icon for the main window). Dictations are kept in the
   history and statistics like on macOS. A missing model opens the main window instead of a dialog.
 - Windows CI build (GitHub Actions): builds the app, runs a self-test and keeps a zip of the app folder.
+- Windows: the windows have the app icon instead of the default one; the setup line names the microphone that is
+  actually used; the default language is Ukrainian + English (`"uk,en"`), as on macOS.
+- History: the last 1000 dictations are kept instead of 20; the history window shows 100 at a time with a
+  "Show more" button. The file is appended to instead of rewritten on every dictation.
 - macOS: the recording indicator could stop showing anywhere (not only over full-screen apps) after the app had run
   for a long time, until it was restarted. Every dictation now gets a freshly created indicator panel, and the log
   says more when macOS keeps it hidden.
