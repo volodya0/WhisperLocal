@@ -22,7 +22,7 @@ public interface IAppHost
     /// <summary>Permissions, server, model, hotkey: what has to be in place before dictation works.</summary>
     IReadOnlyList<SetupItem> GetSetupItems();
 
-    /// <summary>Continuation hints: the language model (Download, Unload) and its server, for the main window's section.</summary>
+    /// <summary>Live hints: the language model (Download, Unload) and its server, for the main window's section.</summary>
     IReadOnlyList<SetupItem> GetSuggestionItems();
 
     IReadOnlyList<HotkeyPreset> HotkeyPresets { get; }
@@ -48,6 +48,6 @@ public interface IAppHost
     /// <summary>Opens a file or folder; <paramref name="textEditor"/> forces a text editor.</summary>
     void OpenPath(string path, bool textEditor = false);
 
-    /// <summary>The main window was shown or hidden (macOS shows a Dock icon only while it is open).</summary>
+    /// <summary>The main window was shown or hidden (macOS brings the app to the front when it is shown).</summary>
     void MainWindowVisibilityChanged(bool visible);
 }

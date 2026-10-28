@@ -130,10 +130,12 @@
       "Xcode": "The text goes into a code editor: keep code identifiers, file names and shell commands verbatim."
     }
   },
-  // Continuation hints: after a dictation, a local language model (bundled llama-server, Metal) suggests a few ways
-  // to continue the text; Option+1…N or a click inserts one. Turn on and download the model in the main window.
+  // Live hints: while the hotkey is held, a local language model (bundled llama-server, Metal) shows the next words
+  // in the language you speak, and for English a mistake in the last phrase. Choose and download in the main window.
   "Suggest": {
-    "Enabled": false,
+    // "Off", "Always" (refreshed while you speak, highlighted on a pause) or "Pause" (only on a pause)
+    "Mode": "Off",
+    "Corrections": true,
     // Relative to the app (built by scripts/build-mac.sh)
     "ServerExe": "llama/llama-server",
     // Relative to ~/Library/Application Support/WhisperLocal; any instruction-tuned GGUF model works
@@ -142,13 +144,15 @@
     "Port": 8179,
     "ExtraArgs": "-c 4096 -ngl 99 --no-webui --reasoning off",
     "Count": 3,
-    "MaxWords": 15,
-    // Earlier dictations into the same app within this many minutes are what the hints continue
+    "MaxWords": 4,
+    "RefreshMs": 1000,
+    // Silence after speech that counts as a pause
+    "PauseMs": 700,
+    // Earlier dictations into the same app within this many minutes are context for the hints
     "ContextMinutes": 10,
-    "ContextChars": 1500,
-    "DisplaySeconds": 12,
-    "Temperature": 0.8,
-    "TimeoutMs": 8000,
+    "ContextChars": 800,
+    "Temperature": 0.4,
+    "TimeoutMs": 3000,
     "StartupTimeoutSec": 60
   },
   "Insert": {
@@ -159,7 +163,7 @@
   "Ui": {
     "ShowOverlay": true,
     // Seconds the indicator keeps a successful dictation's summary (longer while the mouse is over it)
-    "ResultSeconds": 6
+    "ResultSeconds": 3
   },
   "Logging": {
     "LogText": true,

@@ -6,9 +6,12 @@ using WhisperLocal.Text;
 
 namespace WhisperLocal.Llm;
 
+/// <summary>Next words for the live transcript, and a correction of the last English phrase ("" if none).</summary>
+public sealed record LiveHints(IReadOnlyList<string> Next, string Correction);
+
 /// <summary>
-/// Continuation hints: remembers what was recently dictated into each app and asks the local LLM for a few
-/// short ways to continue it.
+/// Live hints: asks the local LLM how the transcript being dictated could go on. Remembers recent dictations into
+/// each app as context.
 /// </summary>
 public sealed class Suggester
 {
@@ -28,18 +31,18 @@ public sealed class Suggester
         get
         {
             var c = _config.Current.Suggest;
-            return c.Enabled && File.Exists(LlamaServer.ResolveServerExe(c)) && File.Exists(LlamaServer.ResolveModel(c));
+            return c.IsOn && File.Exists(LlamaServer.ResolveServerExe(c)) && File.Exists(LlamaServer.ResolveModel(c));
         }
     }
 
-    /// <summary>Adds inserted text (a dictation or an accepted hint) to the context of <paramref name="app"/>.</summary>
+    /// <summary>Adds a finished dictation to the context of <paramref name="app"/>.</summary>
     public void Remember(string? app, string text)
     {
         lock (_recent)
             _recent.Add((DateTime.UtcNow, app ?? "", text.Trim()));
     }
 
-    /// <summary>Loads the model in the background (on hotkey press, so the hints are quick after the dictation).</summary>
+    /// <summary>Loads the model in the background (on hotkey press, so the first hints are quick).</summary>
     public async Task PreloadAsync()
     {
         if (!IsAvailable)
@@ -54,19 +57,16 @@ public sealed class Suggester
         }
     }
 
-    /// <summary>Hints that continue what was recently dictated into <paramref name="app"/>; empty if there is nothing to continue.</summary>
-    public async Task<IReadOnlyList<string>> SuggestAsync(string? app, CancellationToken ct)
+    /// <summary>Hints for <paramref name="transcript"/>, the live transcript of the dictation in progress.</summary>
+    public async Task<LiveHints> SuggestAsync(string? app, string transcript, CancellationToken ct)
     {
         var c = _config.Current.Suggest;
-        var context = Context(app ?? "", c);
-        if (context.Length == 0)
-            return [];
-
         var count = Math.Clamp(c.Count, 1, 5);
-        var words = Math.Max(3, c.MaxWords);
+        var words = Math.Max(1, c.MaxWords);
         var system = c.SystemPrompt.Replace("{count}", count.ToString()).Replace("{words}", words.ToString());
-        if (!string.IsNullOrEmpty(app))
-            system += $"\n\nThe text is being written in the application \"{app}\".";
+
+        var earlier = Earlier(app ?? "", c);
+        var user = earlier.Length > 0 ? $"[Earlier: {earlier}]\n\n{transcript}" : transcript;
 
         // Constrained decoding: the answer is always this JSON, whatever the model would have added around it
         var schema = new
@@ -74,9 +74,10 @@ public sealed class Suggester
             type = "object",
             properties = new
             {
-                suggestions = new { type = "array", items = new { type = "string" }, minItems = count, maxItems = count },
+                next = new { type = "array", items = new { type = "string" }, minItems = count, maxItems = count },
+                correction = new { type = "string" },
             },
-            required = new[] { "suggestions" },
+            required = new[] { "next", "correction" },
         };
 
         // A cold start (loading the model) does not count towards the timeout
@@ -85,18 +86,18 @@ public sealed class Suggester
         cts.CancelAfter(c.TimeoutMs);
 
         var sw = Stopwatch.StartNew();
-        // Ukrainian takes about 3 tokens per word
-        var answer = await _server.ChatAsync([("system", system), ("user", context)], c.Temperature, count * words * 4 + 40, schema, cts.Token);
-        var hints = Parse(answer, context, count, words);
-        Log.Info($"Hints: {hints.Count} in {sw.ElapsedMilliseconds} ms");
-        if (_config.Current.Logging.LogText)
-            foreach (var hint in hints)
-                Log.Info($"  hint: {hint}");
+        // Ukrainian takes about 3 tokens per word; the correction about 30
+        var answer = await _server.ChatAsync([("system", system), ("user", user)], c.Temperature, count * words * 4 + 60, schema, cts.Token);
+        var hints = Parse(answer, transcript, count, words);
+        if (!c.Corrections)
+            hints = hints with { Correction = "" };
+        Log.Debug($"Hints in {sw.ElapsedMilliseconds} ms: {string.Join(" | ", hints.Next)}" +
+                  (hints.Correction.Length > 0 ? $" ✎ {hints.Correction}" : ""));
         return hints;
     }
 
-    /// <summary>Recent text dictated into the same app, oldest first, cut to the last Suggest.ContextChars characters.</summary>
-    private string Context(string app, SuggestConfig c)
+    /// <summary>Recent dictations into the same app, oldest first, cut to the last Suggest.ContextChars characters.</summary>
+    private string Earlier(string app, SuggestConfig c)
     {
         var since = DateTime.UtcNow - TimeSpan.FromMinutes(Math.Max(1, c.ContextMinutes));
         string text;
@@ -115,50 +116,50 @@ public sealed class Suggester
         return text.Trim();
     }
 
-    internal static List<string> Parse(string answer, string context, int count, int maxWords)
+    internal static LiveHints Parse(string answer, string transcript, int count, int maxWords)
     {
-        var hints = new List<string>();
-        JsonElement items;
+        var next = new List<string>();
+        var correction = "";
         try
         {
             using var doc = JsonDocument.Parse(answer);
-            if (!doc.RootElement.TryGetProperty("suggestions", out items) || items.ValueKind != JsonValueKind.Array)
-                return hints;
-            items = items.Clone();
+            if (doc.RootElement.TryGetProperty("next", out var items) && items.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.String)
+                        continue;
+                    var hint = Clean(item.GetString() ?? "", transcript);
+                    if (hint.Length == 0 || next.Contains(hint, StringComparer.OrdinalIgnoreCase))
+                        continue;
+                    // The schema cannot limit words; a runaway hint is cut rather than dropped
+                    var words = hint.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (words.Length > maxWords + 2)
+                        hint = string.Join(' ', words.Take(maxWords + 2)) + "…";
+                    next.Add(hint);
+                    if (next.Count == count)
+                        break;
+                }
+            }
+            if (doc.RootElement.TryGetProperty("correction", out var fix) && fix.ValueKind == JsonValueKind.String)
+                correction = CleanCorrection(fix.GetString() ?? "");
         }
         catch (JsonException ex)
         {
             Log.Warn($"Hints are not valid JSON ({ex.Message}): {answer}");
-            return hints;
         }
-
-        foreach (var item in items.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.String)
-                continue;
-            var hint = Clean(item.GetString() ?? "", context);
-            if (hint.Length == 0 || hints.Contains(hint, StringComparer.OrdinalIgnoreCase))
-                continue;
-            // The schema cannot limit words; a runaway hint is cut rather than dropped
-            var words = hint.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (words.Length > maxWords * 2)
-                hint = string.Join(' ', words.Take(maxWords * 2)) + "…";
-            hints.Add(hint);
-            if (hints.Count == count)
-                break;
-        }
-        return hints;
+        return new LiveHints(next, correction);
     }
 
-    /// <summary>Trims quotes, a leading "…" or comma, and a repeat of the text's end the model sometimes starts with.</summary>
-    private static string Clean(string hint, string context)
+    /// <summary>Trims quotes, a leading "…" or comma, and a repeat of the transcript's end the model sometimes starts with.</summary>
+    private static string Clean(string hint, string transcript)
     {
         hint = Regex.Replace(hint, @"\s+", " ").Trim();
         hint = hint.Trim('"', '«', '»', '“', '”').Trim();
         hint = hint.TrimStart('…', '.', ',', ';', ':', '-', '—', ' ');
 
-        // "…the last words of the text and then more" → "and then more"
-        var tail = context.TrimEnd('.', '!', '?', ' ');
+        // "…the last words of the transcript and then more" → "and then more"
+        var tail = transcript.TrimEnd('.', '!', '?', ' ');
         for (var n = Math.Min(tail.Length, hint.Length - 1); n >= 12; n--)
         {
             if (hint.StartsWith(tail[^n..], StringComparison.OrdinalIgnoreCase))
@@ -168,5 +169,18 @@ public sealed class Suggester
             }
         }
         return TextFilters.CountWords(hint) == 0 ? "" : hint;
+    }
+
+    /// <summary>"wrong → right" with both sides present and different; anything else is dropped.</summary>
+    private static string CleanCorrection(string correction)
+    {
+        var parts = Regex.Split(correction.Trim().Trim('"'), @"\s*(?:→|->|=>)\s*");
+        if (parts.Length != 2)
+            return "";
+        var (wrong, right) = (parts[0].Trim(), parts[1].Trim());
+        if (wrong.Length == 0 || right.Length == 0 || wrong.Length > 80 || right.Length > 80
+            || string.Equals(wrong.TrimEnd('.', ','), right.TrimEnd('.', ','), StringComparison.OrdinalIgnoreCase))
+            return "";
+        return $"{wrong} → {right}";
     }
 }

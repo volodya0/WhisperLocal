@@ -8,41 +8,44 @@ using Avalonia.Threading;
 using WhisperLocal.Config;
 using WhisperLocal.Llm;
 using WhisperLocal.Pipeline;
+using WhisperLocal.Stt;
 
 namespace WhisperLocal.Ui;
 
 /// <summary>
-/// The app's window: status header, setup checklist, hotkey selector, model memory, continuation hints, statistics,
+/// The app's window: status header, setup checklist, hotkey selector, model memory, live hints, statistics,
 /// recent dictations and files. Dark, card-based. Closing only hides it; it refreshes itself while visible.
 /// </summary>
 public sealed class MainWindow : Window
 {
-    private const int HistoryRows = 8;
+    private const int HistoryRows = 10;
 
     private readonly IAppHost _host;
     private readonly TranscriptWindow _transcript;
 
     private readonly Ellipse _statusDot = DarkTheme.Dot(DarkTheme.Idle);
     private readonly TextBlock _status = DarkTheme.MutedLabel("", 13);
-    private readonly StackPanel _setup = new() { Spacing = 4 };
-    private readonly ComboBox _hotkeys = DarkTheme.Dropdown(260);
+    private readonly StackPanel _setup = new() { Spacing = 2 };
+    private readonly ComboBox _hotkeys = DarkTheme.Dropdown(228);
     private readonly Button _record;
-    private readonly TextBlock _hotkeyHint = DarkTheme.MutedLabel("");
-    private readonly ComboBox _languages = DarkTheme.Dropdown(260);
-    private readonly TextBlock _languageHint = DarkTheme.MutedLabel("");
+    private readonly ComboBox _languages = DarkTheme.Dropdown(190);
+    private readonly Note _rowNote = new();
     private readonly Ellipse _memoryDot = DarkTheme.Dot(DarkTheme.Idle);
-    private readonly TextBlock _memory = DarkTheme.Label("");
-    private readonly TextBlock _memoryDetail = DarkTheme.MutedLabel("");
+    private readonly TextBlock _memory = DarkTheme.Label("", 12);
+    private readonly TextBlock _memoryDetail = DarkTheme.MutedLabel("", 11);
     private readonly Button _memoryButton;
-    private readonly CheckBox _hintsEnabled = new()
+    private readonly ComboBox _speechModels = DarkTheme.Dropdown(250);
+    private readonly Note _speechNote = new();
+    private readonly ComboBox _hintModes = DarkTheme.Dropdown(150);
+    private readonly CheckBox _corrections = new()
     {
-        Content = "Suggest how to continue after each dictation",
+        Content = "Point out mistakes when I speak English",
         FontSize = 13,
         Foreground = DarkTheme.Text,
     };
-    private readonly ComboBox _hintModels = DarkTheme.Dropdown(260);
-    private readonly TextBlock _hintHint = DarkTheme.MutedLabel("");
-    private readonly StackPanel _hintStatus = new() { Spacing = 4 };
+    private readonly ComboBox _hintModels = DarkTheme.Dropdown(290);
+    private readonly Note _hintNote = new();
+    private readonly StackPanel _hintStatus = new() { Spacing = 2 };
     private readonly Grid _statTiles = new() { ColumnDefinitions = new ColumnDefinitions("*,*,*,*") };
     private readonly TextBlock _statsNote = DarkTheme.MutedLabel("");
     private readonly StackPanel _history = new();
@@ -57,8 +60,12 @@ public sealed class MainWindow : Window
     private string? _shownSetup;
     private string? _shownHintStatus;
     private string? _shownHintModel;
-    private bool? _shownHintsEnabled;
+    private string? _shownSpeechModel;
+    private List<string> _speechModelPaths = [];
+    private string? _shownHintMode;
+    private bool? _shownCorrections;
     private bool _updatingHints;
+    private bool _updatingSpeechModels;
     private List<string> _hintModelPaths = [];
     private bool _updatingHotkeys;
     private bool _recording;
@@ -78,7 +85,7 @@ public sealed class MainWindow : Window
         Background = DarkTheme.Background;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
-        _record = DarkTheme.Button("Record…", ToggleHotkeyRecording);
+        _record = DarkTheme.Button("Record…", ToggleHotkeyRecording, small: true);
         _memoryButton = DarkTheme.Button("", () => _ = ToggleMemoryAsync(), small: true);
         _memoryButton.MinWidth = 72;
 
@@ -86,16 +93,16 @@ public sealed class MainWindow : Window
         {
             Content = new StackPanel
             {
-                Margin = new Thickness(18, 14, 18, 18),
+                // The same space around the cards as between them
+                Margin = new Thickness(10),
                 Spacing = 10,
                 Children =
                 {
                     Header(),
                     DarkTheme.Section("Setup", _setup),
-                    DarkTheme.Section("Hotkey", HotkeySection()),
-                    DarkTheme.Section("Language", new StackPanel { Spacing = 6, Children = { _languages, _languageHint } }),
+                    DarkTheme.Section("", HotkeyAndLanguageSection()),
                     DarkTheme.Section("Speech model", MemorySection()),
-                    DarkTheme.Section("Continuation hints", HintsSection()),
+                    DarkTheme.Section("Live hints", HintsSection()),
                     DarkTheme.Section("Statistics", StatsSection(),
                         DarkTheme.Segmented(["Today", "7 days", "All time"], _statsPeriod, i =>
                         {
@@ -110,9 +117,12 @@ public sealed class MainWindow : Window
 
         _hotkeys.SelectionChanged += (_, _) => OnHotkeySelected();
         _languages.SelectionChanged += (_, _) => OnLanguageSelected();
-        _hintsEnabled.IsCheckedChanged += (_, _) => OnHintsToggled();
+        _hintModes.SelectionChanged += (_, _) => OnHintModeSelected();
+        _speechModels.SelectionChanged += (_, _) => OnSpeechModelSelected();
+        _corrections.IsCheckedChanged += (_, _) => OnCorrectionsToggled();
         _hintModels.SelectionChanged += (_, _) => OnHintModelSelected();
         _refresh.Tick += (_, _) => Refresh();
+
         _host.History.Changed += () => Dispatcher.UIThread.Post(() =>
         {
             _historyDirty = true;
@@ -174,20 +184,22 @@ public sealed class MainWindow : Window
 
     private Control Header()
     {
-        var titles = new StackPanel
-        {
-            Spacing = 1,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children =
-            {
-                DarkTheme.Label("WhisperLocal", 19, FontWeight.SemiBold),
-                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _statusDot, _status } },
-            },
-        };
+        // One line: icon, name, status; version and updates on the right
+        var title = DarkTheme.Label("WhisperLocal", 15, FontWeight.SemiBold);
+        title.Margin = new Thickness(0, 0, 14, 0);
+        // A grid, not a horizontal StackPanel: the status gets the remaining width and is cut with "…"
+        var status = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), VerticalAlignment = VerticalAlignment.Center };
+        _statusDot.Margin = new Thickness(0, 0, 7, 0);
+        status.Children.Add(_statusDot);
+        _status.TextWrapping = TextWrapping.NoWrap;
+        _status.TextTrimming = TextTrimming.CharacterEllipsis;
+        _status.Margin = new Thickness(0, 0, 10, 0);
+        Grid.SetColumn(_status, 1);
+        status.Children.Add(_status);
         var right = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 12,
+            Spacing = 10,
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
@@ -196,13 +208,15 @@ public sealed class MainWindow : Window
             },
         };
 
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Margin = new Thickness(0, 0, 0, 2) };
-        var icon = DarkTheme.AppIcon(38);
-        icon.Margin = new Thickness(0, 0, 12, 0);
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*,Auto") };
+        var icon = DarkTheme.AppIcon(24);
+        icon.Margin = new Thickness(2, 0, 9, 0);
         grid.Children.Add(icon);
-        Grid.SetColumn(titles, 1);
-        grid.Children.Add(titles);
-        Grid.SetColumn(right, 2);
+        Grid.SetColumn(title, 1);
+        grid.Children.Add(title);
+        Grid.SetColumn(status, 2);
+        grid.Children.Add(status);
+        Grid.SetColumn(right, 3);
         grid.Children.Add(right);
         return grid;
     }
@@ -238,7 +252,7 @@ public sealed class MainWindow : Window
         panel.Children.Clear();
         foreach (var item in items)
         {
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("20,*,Auto"), MinHeight = 26 };
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("18,*,Auto"), MinHeight = 22 };
             row.Children.Add(DarkTheme.Dot(item.State switch
             {
                 SetupState.Ok => DarkTheme.Ok,
@@ -246,7 +260,7 @@ public sealed class MainWindow : Window
                 SetupState.Pending => DarkTheme.Accent,
                 _ => DarkTheme.Error,
             }));
-            var text = DarkTheme.Label(item.Text, brush: item.State == SetupState.Ok ? DarkTheme.Text : DarkTheme.Text);
+            var text = DarkTheme.Label(item.Text, 12);
             Grid.SetColumn(text, 1);
             row.Children.Add(text);
             if (item.ActionLabel != null && item.Action != null)
@@ -267,12 +281,63 @@ public sealed class MainWindow : Window
         }
     }
 
-    // ---- Hotkey ----
+    // ---- Hotkey and language ----
 
-    private Control HotkeySection()
+    private Control HotkeyAndLanguageSection()
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { _hotkeys, _record } };
-        return new StackPanel { Spacing = 6, Children = { row, _hotkeyHint } };
+        ToolTip.SetTip(_record, "Hold any key combination to use it as the hotkey");
+        return new StackPanel
+        {
+            Spacing = 4,
+            Children = { Fields(("Hotkey", _hotkeys), ("", _record), ("Language", _languages)), _rowNote.Line },
+        };
+    }
+
+    /// <summary>
+    /// Labelled controls in one row, side by side while the window is wide enough and wrapping otherwise.
+    /// An empty label puts the control right after the previous one.
+    /// </summary>
+    private static WrapPanel Fields(params (string Label, Control Control)[] fields)
+    {
+        var row = new WrapPanel();
+        StackPanel? group = null;
+        foreach (var (label, control) in fields)
+        {
+            if (label.Length > 0 || group == null)
+            {
+                group = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 2, 24, 2) };
+                if (label.Length > 0)
+                    group.Children.Add(DarkTheme.Label(label));
+                row.Children.Add(group);
+            }
+            group.Children.Add(control);
+        }
+        return row;
+    }
+
+    /// <summary>A line for short messages (saved, errors) that hides itself after a few seconds; descriptions are tooltips.</summary>
+    private sealed class Note
+    {
+        private readonly DispatcherTimer _clear = new() { Interval = TimeSpan.FromSeconds(5) };
+
+        public Note()
+        {
+            Line.IsVisible = false;
+            _clear.Tick += (_, _) => Set("");
+        }
+
+        public TextBlock Line { get; } = DarkTheme.MutedLabel("");
+
+        /// <summary>"" hides the line; a sticky message stays until replaced.</summary>
+        public void Set(string text, IBrush? brush = null, bool sticky = false)
+        {
+            _clear.Stop();
+            Line.Text = text;
+            Line.Foreground = brush ?? DarkTheme.Muted;
+            Line.IsVisible = text.Length > 0;
+            if (text.Length > 0 && !sticky)
+                _clear.Start();
+        }
     }
 
     private void RefreshHotkey()
@@ -294,7 +359,7 @@ public sealed class MainWindow : Window
         _hotkeys.ItemsSource = _hotkeyChoices.Select(p => p.Title).ToList();
         _hotkeys.SelectedIndex = index;
         _updatingHotkeys = false;
-        SetHotkeyHint("Hold to record, release to transcribe. Record… takes any combination you hold.");
+        ToolTip.SetTip(_hotkeys, "Hold to record, release to transcribe. Record… takes any combination you hold.");
     }
 
     private bool SameHotkey(string a, string b) =>
@@ -317,7 +382,7 @@ public sealed class MainWindow : Window
         }
 
         var error = _host.StartHotkeyRecording(
-            preview => Dispatcher.UIThread.Post(() => SetHotkeyHint($"{preview} … release to save", DarkTheme.Accent)),
+            preview => Dispatcher.UIThread.Post(() => _rowNote.Set($"{preview} … release to save", DarkTheme.Accent, sticky: true)),
             key => Dispatcher.UIThread.Post(() =>
             {
                 StopHotkeyRecording();
@@ -326,12 +391,12 @@ public sealed class MainWindow : Window
             }));
         if (error != null)
         {
-            SetHotkeyHint(error, DarkTheme.Warning);
+            _rowNote.Set(error, DarkTheme.Warning);
             return;
         }
         _recording = true;
         _record.Content = "Cancel";
-        SetHotkeyHint("Listening… hold the keys you want, then release. Esc cancels.", DarkTheme.Accent);
+        _rowNote.Set("Listening… hold the keys you want, then release. Esc cancels.", DarkTheme.Accent, sticky: true);
     }
 
     private void StopHotkeyRecording()
@@ -347,19 +412,13 @@ public sealed class MainWindow : Window
         try
         {
             ConfigEditor.SetValue(_host.Config.FilePath, "Hotkey", "Key", key);
-            SetHotkeyHint($"Saved. Hold {_host.DescribeHotkey(key)} to dictate.", DarkTheme.Ok);
+            _rowNote.Set($"Saved. Hold {_host.DescribeHotkey(key)} to dictate.", DarkTheme.Ok);
         }
         catch (Exception ex)
         {
             Log.Error("Saving the hotkey failed", ex);
-            SetHotkeyHint($"Could not save the hotkey: {ex.Message}", DarkTheme.Error);
+            _rowNote.Set($"Could not save the hotkey: {ex.Message}", DarkTheme.Error);
         }
-    }
-
-    private void SetHotkeyHint(string text, IBrush? brush = null)
-    {
-        _hotkeyHint.Text = text;
-        _hotkeyHint.Foreground = brush ?? DarkTheme.Muted;
     }
 
     // ---- Language ----
@@ -393,10 +452,9 @@ public sealed class MainWindow : Window
         _languages.ItemsSource = _languageChoices.Select(c => c.Title).ToList();
         _languages.SelectedIndex = index;
         _updatingLanguages = false;
-        _languageHint.Text = index < LanguagePresets.Length
+        ToolTip.SetTip(_languages, index < LanguagePresets.Length
             ? LanguagePresets[index].Hint
-            : "Set in the config (Whisper.Language): a code like \"de\", or a list like \"uk,en,pl\".";
-        _languageHint.Foreground = DarkTheme.Muted;
+            : "Set in the config (Whisper.Language): a code like \"de\", or a list like \"uk,en,pl\".");
     }
 
     private static bool SameLanguages(string a, string b) =>
@@ -410,14 +468,12 @@ public sealed class MainWindow : Window
         try
         {
             ConfigEditor.SetValue(_host.Config.FilePath, "Whisper", "Language", _languageChoices[i].Value);
-            _languageHint.Text = i < LanguagePresets.Length ? $"Saved. {LanguagePresets[i].Hint}" : "Saved.";
-            _languageHint.Foreground = DarkTheme.Ok;
+            _rowNote.Set(i < LanguagePresets.Length ? $"Saved. {LanguagePresets[i].Hint}" : "Saved.", DarkTheme.Ok);
         }
         catch (Exception ex)
         {
             Log.Error("Saving the language failed", ex);
-            _languageHint.Text = $"Could not save the language: {ex.Message}";
-            _languageHint.Foreground = DarkTheme.Error;
+            _rowNote.Set($"Could not save the language: {ex.Message}", DarkTheme.Error);
         }
     }
 
@@ -425,23 +481,78 @@ public sealed class MainWindow : Window
 
     private Control MemorySection()
     {
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("20,*,Auto") };
+        // One row: model choice, then whether it is loaded
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,18,*,Auto") };
+        _speechModels.Margin = new Thickness(0, 0, 16, 0);
+        grid.Children.Add(_speechModels);
+        Grid.SetColumn(_memoryDot, 1);
         grid.Children.Add(_memoryDot);
-        var texts = new StackPanel { Spacing = 2, Children = { _memory, _memoryDetail } };
-        Grid.SetColumn(texts, 1);
+        var texts = new StackPanel
+        {
+            Spacing = 1,
+            Margin = new Thickness(0, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { _memory, _memoryDetail },
+        };
+        Grid.SetColumn(texts, 2);
         grid.Children.Add(texts);
-        Grid.SetColumn(_memoryButton, 2);
+        Grid.SetColumn(_memoryButton, 3);
         grid.Children.Add(_memoryButton);
-        return grid;
+        return new StackPanel { Spacing = 4, Children = { grid, _speechNote.Line } };
     }
 
     private void RefreshMemory()
     {
+        var path = _host.Config.Current.Whisper.ModelPath;
+        if (path != _shownSpeechModel)
+        {
+            _shownSpeechModel = path;
+            var titles = WhisperModels.Catalog.Select(m => $"{m.Title} · {m.Size}").ToList();
+            _speechModelPaths = WhisperModels.Catalog.Select(m => "models/" + m.File).ToList();
+            var known = WhisperModels.Find(path);
+            var index = known != null ? WhisperModels.Catalog.ToList().IndexOf(known) : -1;
+            if (index < 0)
+            {
+                titles.Add($"Custom: {System.IO.Path.GetFileName(path)}");
+                _speechModelPaths.Add(path);
+                index = titles.Count - 1;
+            }
+            _updatingSpeechModels = true;
+            _speechModels.ItemsSource = titles;
+            _speechModels.SelectedIndex = index;
+            _updatingSpeechModels = false;
+        }
+        ToolTip.SetTip(_speechModels, WhisperModels.Find(path)?.Hint ?? "Set in the config (Whisper.ModelPath).");
+        // Checked every time: the note goes away when the download finishes
+        if (!File.Exists(AppPaths.Resolve(path)))
+            _speechNote.Set(NotDownloaded, DarkTheme.Warning, sticky: true);
+        else if (_speechNote.Line.Text == NotDownloaded)
+            _speechNote.Set("");
+
         var (loaded, detail) = _host.GetModelMemory();
         _memoryDot.Fill = loaded ? DarkTheme.Ok : DarkTheme.Idle;
         _memory.Text = loaded ? "Loaded in memory" : "Not loaded";
         _memoryDetail.Text = detail;
         _memoryButton.Content = loaded ? "Unload" : "Load";
+    }
+
+    private const string NotDownloaded = "Not downloaded yet: press Download in Setup above.";
+
+    private void OnSpeechModelSelected()
+    {
+        var i = _speechModels.SelectedIndex;
+        if (_updatingSpeechModels || i < 0 || i >= _speechModelPaths.Count)
+            return;
+        try
+        {
+            // The hint below the dropdown follows on the next refresh; whisper-server restarts with it on the next dictation
+            ConfigEditor.SetValue(_host.Config.FilePath, "Whisper", "ModelPath", _speechModelPaths[i]);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Saving Whisper.ModelPath failed", ex);
+            _speechNote.Set($"Could not save the model: {ex.Message}", DarkTheme.Error);
+        }
     }
 
     private async Task ToggleMemoryAsync()
@@ -469,40 +580,43 @@ public sealed class MainWindow : Window
         }
     }
 
-    // ---- Continuation hints ----
+    // ---- Live hints ----
 
-    private Control HintsSection()
+    private static readonly (string Title, string Value, string Hint)[] HintModes =
+    [
+        ("Off", "Off", "No hints."),
+        ("Always", "Always",
+            "While you speak, the next words in your language refresh about every second, dim; they light up when you pause."),
+        ("When I pause", "Pause", "Nothing while you speak fluently; the next words appear after a short pause."),
+    ];
+
+    private const string HintsDescription =
+        "While you hold the hotkey, a local language model shows how your sentence could go on, in the language you speak. " +
+        "Just say the word you need.";
+
+    private Control HintsSection() => new StackPanel
     {
-        var model = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            Children = { DarkTheme.Label("Model"), _hintModels },
-        };
-        return new StackPanel
-        {
-            Spacing = 6,
-            Children =
-            {
-                _hintsEnabled,
-                DarkTheme.MutedLabel("A local language model offers a few ways to continue what you just dictated. " +
-                                     "Option+1, 2, 3 or a click inserts one; any other key hides them."),
-                model,
-                _hintHint,
-                _hintStatus,
-            },
-        };
-    }
+        Spacing = 4,
+        Children = { Fields(("Mode", _hintModes), ("Model", _hintModels)), _corrections, _hintNote.Line, _hintStatus },
+    };
 
     private void RefreshHints()
     {
         var c = _host.Config.Current.Suggest;
         _updatingHints = true;
         // Only on a change in the config: a click shows at once, the config catches up after the save
-        if (c.Enabled != _shownHintsEnabled)
+        if (c.Mode != _shownHintMode)
         {
-            _shownHintsEnabled = c.Enabled;
-            _hintsEnabled.IsChecked = c.Enabled;
+            _shownHintMode = c.Mode;
+            var index = Array.FindIndex(HintModes, m => string.Equals(m.Value, c.Mode, StringComparison.OrdinalIgnoreCase));
+            _hintModes.ItemsSource = HintModes.Select(m => m.Title).ToList();
+            _hintModes.SelectedIndex = Math.Max(0, index);
+            ToolTip.SetTip(_hintModes, $"{HintsDescription}\n\n{HintModes[Math.Max(0, index)].Hint}");
+        }
+        if (c.Corrections != _shownCorrections)
+        {
+            _shownCorrections = c.Corrections;
+            _corrections.IsChecked = c.Corrections;
         }
         if (c.ModelPath != _shownHintModel)
         {
@@ -518,32 +632,46 @@ public sealed class MainWindow : Window
             }
             _hintModels.ItemsSource = titles;
             _hintModels.SelectedIndex = index;
-            SetHintHint(LlmModels.Find(c.ModelPath)?.Hint ?? "Set in the config (Suggest.ModelPath): any instruction-tuned GGUF model.");
+            ToolTip.SetTip(_hintModels, LlmModels.Find(c.ModelPath)?.Hint ?? "Set in the config (Suggest.ModelPath): any instruction-tuned GGUF model.");
         }
         _updatingHints = false;
 
-        _hintModels.IsEnabled = c.Enabled;
-        _hintStatus.IsVisible = c.Enabled;
-        if (c.Enabled)
+        _corrections.IsVisible = c.IsOn;
+        _hintModels.IsEnabled = c.IsOn;
+        _hintStatus.IsVisible = c.IsOn;
+        if (c.IsOn)
             RenderItems(_hintStatus, _host.GetSuggestionItems(), ref _shownHintStatus);
     }
 
-    private void OnHintsToggled()
+    private void OnHintModeSelected()
     {
-        if (_updatingHints)
+        var i = _hintModes.SelectedIndex;
+        if (_updatingHints || i < 0 || i >= HintModes.Length)
             return;
-        var enabled = _hintsEnabled.IsChecked == true;
         try
         {
-            ConfigEditor.SetValue(_host.Config.FilePath, "Suggest", "Enabled", enabled);
-            SetHintHint(enabled
-                ? "Saved. Download the model below if it is not there yet; hints appear after your next dictation."
-                : "Saved. Hints are off; the language model is unloaded.", DarkTheme.Ok);
+            ConfigEditor.SetValue(_host.Config.FilePath, "Suggest", "Mode", HintModes[i].Value);
+            _hintNote.Set(i == 0 ? "Saved. Hints are off; the language model is unloaded." : $"Saved. {HintModes[i].Hint}", DarkTheme.Ok);
         }
         catch (Exception ex)
         {
-            Log.Error("Saving Suggest.Enabled failed", ex);
-            SetHintHint($"Could not save: {ex.Message}", DarkTheme.Error);
+            Log.Error("Saving Suggest.Mode failed", ex);
+            _hintNote.Set($"Could not save: {ex.Message}", DarkTheme.Error);
+        }
+    }
+
+    private void OnCorrectionsToggled()
+    {
+        if (_updatingHints)
+            return;
+        try
+        {
+            ConfigEditor.SetValue(_host.Config.FilePath, "Suggest", "Corrections", _corrections.IsChecked == true);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Saving Suggest.Corrections failed", ex);
+            _hintNote.Set($"Could not save: {ex.Message}", DarkTheme.Error);
         }
     }
 
@@ -555,19 +683,13 @@ public sealed class MainWindow : Window
         try
         {
             ConfigEditor.SetValue(_host.Config.FilePath, "Suggest", "ModelPath", _hintModelPaths[i]);
-            SetHintHint(LlmModels.Find(_hintModelPaths[i])?.Hint ?? "Saved.");
+            _hintNote.Set("Saved." + (LlmModels.Find(_hintModelPaths[i]) is { } model ? $" {model.Hint}" : ""), DarkTheme.Ok);
         }
         catch (Exception ex)
         {
             Log.Error("Saving Suggest.ModelPath failed", ex);
-            SetHintHint($"Could not save the model: {ex.Message}", DarkTheme.Error);
+            _hintNote.Set($"Could not save the model: {ex.Message}", DarkTheme.Error);
         }
-    }
-
-    private void SetHintHint(string text, IBrush? brush = null)
-    {
-        _hintHint.Text = text;
-        _hintHint.Foreground = brush ?? DarkTheme.Muted;
     }
 
     // ---- Statistics ----

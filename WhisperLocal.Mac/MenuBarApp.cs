@@ -26,7 +26,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
     private const string AccessibilitySettings = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
     private const string MicrophoneSettings = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
-    private const long ActivationRegular = 0, ActivationAccessory = 1;
 
     // Failures and "no speech" need only a glance; a successful summary stays Ui.ResultSeconds
     private static readonly TimeSpan BriefDisplay = TimeSpan.FromSeconds(2);
@@ -47,6 +46,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private readonly DictationPipeline _pipeline;
     private readonly LlamaServer _llama;
     private readonly Suggester _suggester;
+    private readonly LiveHinter _hinter;
     private readonly MacTextInserter _inserter = new();
     private readonly RecordingOverlay _overlay;
     private readonly SuggestionPanel _hints;
@@ -63,9 +63,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private bool _checkingForUpdates;
     private Download? _download;
     private Download? _llmDownload;
-    private CancellationTokenSource? _hintRequest;
-    private IReadOnlyList<string> _shownHints = [];
-    private FrontmostApp? _hintTarget;
+    private CancellationTokenSource? _liveHints;
     private bool _disposed;
 
     /// <summary>A model download in progress: what the setup line shows, and how to cancel it.</summary>
@@ -88,8 +86,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _pipeline = new DictationPipeline(config, _stt, _llm);
         _llama = new LlamaServer(config);
         _suggester = new Suggester(config, _llama);
+        _hinter = new LiveHinter(config, _stt, _suggester);
         _overlay = new RecordingOverlay(_ui, ShowLastTranscript);
-        _hints = new SuggestionPanel(_ui, index => _ = InsertHintAsync(index));
+        _hints = new SuggestionPanel();
         _mainWindow = new MainWindow(this, _transcriptWindow);
 
         _menu = new StatusMenu();
@@ -115,9 +114,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _hotkey.HotkeyDown += OnHotkeyDown;
         _hotkey.HotkeyUp += OnHotkeyUp;
         _hotkey.HotkeyCancel += OnHotkeyCancel;
-        _hotkey.HintChosen += index => _ = InsertHintAsync(index);
-        _hotkey.HintsDismissed += DismissHints;
-        _hints.Expired += DismissHints;
         _hotkey.PermissionMissing += () => Dialogs.Notify(
             "Allow WhisperLocal in System Settings → Privacy & Security → Accessibility. The hotkey starts working as soon as it is allowed.");
         _hotkey.Installed += () => Dialogs.Notify($"Ready: hold {HotkeyTap.Describe(_config.Current.Hotkey.Key)} to dictate");
@@ -287,11 +283,10 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
     public void MainWindowVisibilityChanged(bool visible)
     {
-        // A regular app (Dock icon, Cmd+Tab) while the window is open, so it cannot get lost; menu bar only otherwise
-        var app = ObjC.Send(ObjC.Class("NSApplication"), ObjC.Sel("sharedApplication"));
-        ObjC.Send(app, ObjC.Sel("setActivationPolicy:"), visible ? ActivationRegular : ActivationAccessory);
+        // The app stays a menu bar (accessory) app, no Dock icon: once it has been a regular app, macOS no longer shows
+        // its indicator over full-screen apps, even after switching back
         if (visible)
-            ObjC.Send(app, ObjC.Sel("activateIgnoringOtherApps:"), true);
+            ObjC.Send(ObjC.Send(ObjC.Class("NSApplication"), ObjC.Sel("sharedApplication")), ObjC.Sel("activateIgnoringOtherApps:"), true);
     }
 
     // ---- Dictation ----
@@ -338,9 +333,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         }
         _hotkey.SuppressKey = cfg.Hotkey.SuppressKey;
 
-        if (!cfg.Suggest.Enabled)
+        if (!cfg.Suggest.IsOn)
         {
-            DismissHints();
+            StopLiveHints();
             if (_llama.IsLoaded)
                 _llama.Unload();
         }
@@ -362,6 +357,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (_state != State.Recording)
             return;
         Log.Info("Recording cancelled: another key was pressed while holding the hotkey");
+        StopLiveHints();
         await _recorder.StopAsync();
         _overlay.Hide();
         SetState(State.Idle);
@@ -371,7 +367,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     {
         if (!_enabled || _state != State.Idle)
             return;
-        DismissHints();
 
         var cfg = _config.Current;
 
@@ -402,7 +397,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (cfg.Ui.ShowOverlay)
             _overlay.ShowRecording(_pressedAt);
         _ = _pipeline.PrepareAsync();
-        _ = _suggester.PreloadAsync();
+        StartLiveHints();
     }
 
     private void OnHotkeyUp() => _ = FinishRecordingAsync();
@@ -415,6 +410,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         var cfg = _config.Current;
         var recordSec = Stopwatch.GetElapsedTime(_pressedAt).TotalSeconds;
         var processStart = Stopwatch.GetTimestamp();
+        StopLiveHints();
         SetState(State.Processing);
         if (cfg.Ui.ShowOverlay)
             _overlay.ShowProcessing(processStart);
@@ -437,14 +433,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
                 return;
 
             var text = cfg.Insert.AppendTrailingSpace ? result.FinalText + " " : result.FinalText;
-            var inserted = InsertAsync(text, _target);
-            if (_suggester.IsAvailable)
-            {
-                // The hints are generated while the text is being pasted
+            await _inserter.InsertAsync(text, _target, cfg.Insert);
+            if (cfg.Suggest.IsOn)
                 _suggester.Remember(_target?.ProcessName, result.FinalText);
-                RequestHints(_target, inserted);
-            }
-            await inserted;
         }
         catch (Exception ex)
         {
@@ -497,101 +488,46 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _history.Add(record);
     }
 
-    // ---- Continuation hints ----
+    // ---- Live hints ----
 
-    /// <summary>Pastes the text; returns when it was done, the moment typing by the user starts to count.</summary>
-    private async Task<long> InsertAsync(string text, FrontmostApp? target)
+    /// <summary>On hotkey press: loads the model while the user starts speaking and shows hints until release.</summary>
+    private void StartLiveHints()
     {
-        await _inserter.InsertAsync(text, target, _config.Current.Insert);
-        return Stopwatch.GetTimestamp();
+        StopLiveHints();
+        if (!_suggester.IsAvailable)
+            return;
+        _ = _suggester.PreloadAsync();
+        var live = _liveHints = new CancellationTokenSource();
+        _ = RunLiveHintsAsync(live);
     }
 
-    /// <summary>Asks for hints that continue the text just pasted (by <paramref name="inserted"/>) and shows them.</summary>
-    private void RequestHints(FrontmostApp? target, Task<long> inserted)
-    {
-        _hintRequest?.Cancel();
-        var request = _hintRequest = new CancellationTokenSource();
-        _ = ShowHintsAsync(target, inserted, request);
-    }
-
-    private async Task ShowHintsAsync(FrontmostApp? target, Task<long> inserted, CancellationTokenSource request)
+    private async Task RunLiveHintsAsync(CancellationTokenSource live)
     {
         try
         {
-            var hints = await _suggester.SuggestAsync(target?.ProcessName, request.Token);
-            var insertedAt = await inserted;
-            // A new dictation cancels the request; Processing here is still the dictation these hints belong to
-            if (request.IsCancellationRequested || _state == State.Recording || hints.Count == 0)
-                return;
-
-            // Typing after the paste means the user went on without hints; showing them now would only get in the way
-            var sinceKey = MacNative.CGEventSourceSecondsSinceLastEventType(MacNative.kCGEventSourceStateHIDSystemState, MacNative.kCGEventKeyDown);
-            if (sinceKey < Stopwatch.GetElapsedTime(insertedAt).TotalSeconds)
+            await _hinter.RunAsync(_recorder.Snapshot, _target?.ProcessName, (hints, pausing) =>
             {
-                Log.Debug("Hints dropped: the user is typing");
-                return;
-            }
-
-            var count = Math.Min(hints.Count, SuggestionPanel.MaxRows);
-            _shownHints = hints.Take(count).ToList();
-            _hintTarget = target;
-            _hints.Show(_shownHints, TimeSpan.FromSeconds(Math.Max(2, _config.Current.Suggest.DisplaySeconds)));
-            _hotkey.HintCount = count;
-        }
-        catch (OperationCanceledException) when (request.IsCancellationRequested)
-        {
-            // A new dictation or a key press came first
-        }
-        catch (OperationCanceledException)
-        {
-            Log.Warn($"Hints took longer than {_config.Current.Suggest.TimeoutMs} ms (Suggest.TimeoutMs), dropped");
-        }
-        catch (Exception ex)
-        {
-            // The dictation itself succeeded; a notification for every failed hint would be noise
-            Log.Warn($"Hints failed: {ex.Message}");
+                if (live.IsCancellationRequested)
+                    return;
+                if (hints == null)
+                    _hints.Hide();
+                else
+                    _hints.Show(hints.Next, hints.Correction, pausing);
+            }, live.Token);
         }
         finally
         {
-            if (_hintRequest == request)
-                _hintRequest = null;
-            request.Dispose();
+            if (_liveHints == live)
+                _liveHints = null;
+            live.Dispose();
         }
     }
 
-    private void DismissHints()
+    private void StopLiveHints()
     {
-        _hintRequest?.Cancel();
-        _hintRequest = null;
-        _hotkey.HintCount = 0;
+        _liveHints?.Cancel();
+        _liveHints = null;
         _hints.Hide();
-        _shownHints = [];
-    }
-
-    /// <summary>Pastes hint <paramref name="index"/> (Option+digit or a click), then asks for the next hints.</summary>
-    private async Task InsertHintAsync(int index)
-    {
-        var hints = _shownHints;
-        var target = _hintTarget;
-        DismissHints();
-        if (index < 0 || index >= hints.Count || _state != State.Idle)
-            return;
-
-        var hint = hints[index];
-        Log.Info($"Hint {index + 1} chosen");
-        _lastActivityUtc = DateTime.UtcNow;
-        try
-        {
-            var inserted = InsertAsync(_config.Current.Insert.AppendTrailingSpace ? hint + " " : hint, target);
-            _suggester.Remember(target?.ProcessName, hint);
-            if (_suggester.IsAvailable)
-                RequestHints(target, inserted);
-            await inserted;
-        }
-        catch (Exception ex)
-        {
-            ReportError("Inserting the hint failed", ex);
-        }
     }
 
     private void ToggleEnabled()
@@ -618,7 +554,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             SetState(State.Idle);
         }
 
-        DismissHints();
+        StopLiveHints();
         _stt.Unload();
         _llama.Unload();
         if (_config.Current.Llm.Enabled)
@@ -695,7 +631,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         try
         {
             if (await DownloadAsync(model, url, download))
-                Dialogs.Notify("Language model downloaded: hints appear after your next dictation");
+                Dialogs.Notify("Language model downloaded: hints appear while you dictate");
         }
         finally
         {
@@ -845,7 +781,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _disposed = true;
         _download?.Cancel.Cancel();
         _llmDownload?.Cancel.Cancel();
-        _hintRequest?.Cancel();
+        _liveHints?.Cancel();
         _idleTimer.Dispose();
         _hotkey.Dispose();
         _recorder.Dispose();

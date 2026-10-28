@@ -43,7 +43,7 @@ Same pipeline, macOS-native pieces: CGEventTap hotkey → AudioQueue capture (16
 
 1. Install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), the Xcode Command Line Tools
    (`xcode-select --install`) and CMake (`brew install cmake`).
-2. Build whisper-server and llama-server (continuation hints) with Metal, and the app bundle:
+2. Build whisper-server and llama-server (live hints) with Metal, and the app bundle:
    ```
    scripts/build-mac.sh --install        # → artifacts/WhisperLocal.app, copied to ~/Applications
    scripts/build-mac.sh --dmg            # or a drag-to-Applications disk image to share
@@ -71,9 +71,10 @@ from Applications again):
   Ukrainian only, English only or any (`Whisper.Language`: `"uk,en"`, `"uk,en,ru"`, `"uk"`, `"en"`, `"auto"`; any list of
   codes works, the first is the fallback). A single fixed language makes Whisper write speech in
   another language translated into it;
-- whether the model is in memory, with Unload / Load;
-- continuation hints: on/off, the language model (Gemma 3 4B, Gemma 3 12B or Qwen 3 4B) with an in-app download,
-  and whether it is loaded;
+- speech model: Large v3 (most accurate) or Large v3 Turbo (several times faster, almost as accurate; best with
+  live hints), downloaded from Setup; whether it is in memory, with Unload / Load;
+- live hints: Off / Always / When I pause, English corrections, the language model (Gemma 3 4B, Gemma 3 12B or
+  Qwen 3 4B) with an in-app download, and whether it is loaded;
 - buttons for the config, the log, the logs and data folders;
 - statistics for today, the last 7 days and all time: dictations, words, speaking time and speaking rate
   (`stats.json` in the data folder, never trimmed; only dictations that produced text count);
@@ -81,17 +82,21 @@ from Applications again):
   (the last 20 in `history.jsonl` in the data folder; the text is kept only with `Logging.LogText`).
 
 The indicator at the bottom of the screen counts seconds while recording and processing, then shows a summary
-(recording time, processing time, words) for 6 seconds (`Ui.ResultSeconds`) — longer while the mouse is over it — with a **Text**
+(recording time, processing time, words) for 3 seconds (`Ui.ResultSeconds`) — longer while the mouse is over it — with a **Text**
 button that opens the transcript with a Copy button ("Show Last Transcript" in the menu does the same).
 
-**Continuation hints** (off by default; turn on in the main window): after each dictation a local language model
-suggests a few short ways to continue the text, shown above the indicator. **Option+1/2/3** or a click inserts one
-(and asks for the next hints); Esc or any other key hides them, and they also go away by themselves after 12 s
-(`Suggest.DisplaySeconds`). The model sees what you dictated into the same app over the last 10 minutes
-(`Suggest.ContextMinutes`). It runs in the bundled llama.cpp `llama-server` (Metal, port 8179) and loads while you
-speak; the GGUF model is downloaded from HuggingFace into the models folder by the **Download** button, no Ollama
-needed. Gemma 3 4B (2.5 GB, about 3 GB of memory while loaded) is the default; it is unloaded with the speech model
-after `Memory.IdleUnloadMinutes`. Settings: the `Suggest` section of the config.
+**Live hints** (off by default; choose "Always" or "When I pause" in the main window): while you hold the hotkey,
+a local language model shows how your sentence could go on: 3 short options for the next words, in the language
+you are speaking (Ukrainian or English; English hints are natural, correct English), above the indicator. Just say
+the one you need. With "Always" they refresh about every second while new speech comes in (`Suggest.RefreshMs`),
+dim, and light up when you pause for 0.7 s (`Suggest.PauseMs`); "When I pause" shows them only then. When you speak
+English, a second line points out a clear mistake in your last phrase ("✎ I am agree → I agree"; switch:
+`Suggest.Corrections`); the pasted text stays what you said. How it works: the audio recorded so far is transcribed
+by whisper-server as you go, and the bundled llama.cpp `llama-server` (Metal, port 8179) predicts the next words,
+with your recent dictations into the same app as context. The GGUF model is downloaded from HuggingFace into the
+models folder by the **Download** button, no Ollama needed. Gemma 3 4B (2.5 GB, about 3 GB of memory while loaded)
+is the default; it is unloaded with the speech model after `Memory.IdleUnloadMinutes`. Settings: the `Suggest`
+section of the config.
 
 macOS specifics:
 

@@ -103,7 +103,6 @@ internal static class Program
             ObjC.Class("AVCaptureDevice");
             _ = MacNative.kCFRunLoopCommonModes;
             _ = MacNative.CGEventSourceFlagsState(MacNative.kCGEventSourceStateHIDSystemState);
-            _ = MacNative.CGEventSourceSecondsSinceLastEventType(MacNative.kCGEventSourceStateHIDSystemState, MacNative.kCGEventKeyDown);
             _ = MacNative.AXIsProcessTrusted();
             // Avalonia's native platform and a window of the shared UI
             BuildAvaloniaApp().SetupWithoutStarting();

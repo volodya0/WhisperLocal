@@ -194,12 +194,17 @@ public sealed class LlmConfig
 public sealed record FewShotExample(string Input, string Output);
 
 /// <summary>
-/// Continuation hints: after a dictation, a local LLM (bundled llama-server) suggests a few ways to continue the text;
-/// Option+1…N (Alt on Windows) inserts one. The model is a GGUF file downloaded from the main window.
+/// Live hints while dictating: as you speak, a local LLM (bundled llama-server) suggests the next words in the language
+/// you speak, and for English points out a mistake in the last phrase. The model is a GGUF file downloaded from the
+/// main window.
 /// </summary>
 public sealed class SuggestConfig
 {
-    public bool Enabled { get; set; } = false;
+    /// <summary>"Off"; "Always": refreshed about every RefreshMs while speaking, highlighted on a pause; "Pause": only on a pause.</summary>
+    public string Mode { get; set; } = "Off";
+
+    /// <summary>For English speech, show a clear grammar or word-choice mistake in the last phrase ("I am agree → I agree").</summary>
+    public bool Corrections { get; set; } = true;
 
     /// <summary>Relative to the executable's directory, like Whisper.ServerExe.</summary>
     public string ServerExe { get; set; } = OperatingSystem.IsWindows() ? @"llama\llama-server.exe" : "llama/llama-server";
@@ -217,26 +222,32 @@ public sealed class SuggestConfig
     public int Count { get; set; } = 3;
 
     /// <summary>Upper bound of words per hint.</summary>
-    public int MaxWords { get; set; } = 15;
+    public int MaxWords { get; set; } = 4;
 
-    /// <summary>Earlier dictations into the same app within this many minutes are the context the hints continue.</summary>
+    /// <summary>"Always" mode: how often the live transcript and the hints are refreshed while new speech comes in.</summary>
+    public int RefreshMs { get; set; } = 1000;
+
+    /// <summary>Silence after speech that counts as a pause (searching for a word).</summary>
+    public int PauseMs { get; set; } = 700;
+
+    /// <summary>Earlier dictations into the same app within this many minutes are context for the hints.</summary>
     public int ContextMinutes { get; set; } = 10;
 
-    /// <summary>Characters of context sent to the model (the end of it).</summary>
-    public int ContextChars { get; set; } = 1500;
+    /// <summary>Characters of earlier context sent to the model (the end of it).</summary>
+    public int ContextChars { get; set; } = 800;
 
-    /// <summary>How long the hints stay (longer while the mouse is over them); any key press hides them sooner.</summary>
-    public double DisplaySeconds { get; set; } = 12;
+    /// <summary>Low values give the most likely words; higher ones more varied hints.</summary>
+    public double Temperature { get; set; } = 0.4;
 
-    /// <summary>Higher values give more varied hints.</summary>
-    public double Temperature { get; set; } = 0.8;
-
-    /// <summary>Timeout for one request once the model is loaded; hints that arrive later are dropped.</summary>
-    public int TimeoutMs { get; set; } = 8000;
+    /// <summary>Timeout for one hint request once the model is loaded; late hints are dropped.</summary>
+    public int TimeoutMs { get; set; } = 3000;
 
     public int StartupTimeoutSec { get; set; } = 60;
 
-    public string SystemPrompt { get; set; } = DefaultPrompts.Suggest;
+    public string SystemPrompt { get; set; } = DefaultPrompts.LiveHints;
+
+    public bool IsOn => !string.Equals(Mode, "Off", StringComparison.OrdinalIgnoreCase);
+    public bool OnPauseOnly => string.Equals(Mode, "Pause", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class InsertConfig
@@ -251,7 +262,7 @@ public sealed class UiConfig
     public bool ShowOverlay { get; set; } = true;
 
     /// <summary>How long the indicator shows a successful dictation's summary (longer while the mouse is over it).</summary>
-    public double ResultSeconds { get; set; } = 6;
+    public double ResultSeconds { get; set; } = 3;
 }
 
 public sealed class LoggingConfig

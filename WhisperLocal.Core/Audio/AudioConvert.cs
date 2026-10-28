@@ -70,6 +70,27 @@ internal static class AudioConvert
         return rms <= 0 ? double.NegativeInfinity : 20 * Math.Log10(rms);
     }
 
+    /// <summary>Length of the silence at the end: trailing 30 ms frames quieter than <paramref name="thresholdDbfs"/>.</summary>
+    public static double TrailingSilenceMs(byte[] pcm, double thresholdDbfs)
+    {
+        const int frameSamples = 480;
+        var threshold = Math.Pow(10, thresholdDbfs / 20);
+        var frames = 0;
+        for (var end = pcm.Length / 2; end >= frameSamples; end -= frameSamples)
+        {
+            double sum = 0;
+            for (var i = end - frameSamples; i < end; i++)
+            {
+                double s = BitConverter.ToInt16(pcm, i * 2) / 32768.0;
+                sum += s * s;
+            }
+            if (Math.Sqrt(sum / frameSamples) >= threshold)
+                break;
+            frames++;
+        }
+        return frames * frameSamples * 1000.0 / TargetFormat.SampleRate;
+    }
+
     private static float[] DownmixToMono(byte[] raw, WaveFormat format)
     {
         var isFloat = format.Encoding == WaveFormatEncoding.IeeeFloat

@@ -2,10 +2,22 @@
 
 ## Unreleased
 
-- Continuation hints (macOS, off by default): after a dictation a local LLM suggests a few ways to continue the text
-  in a panel above the indicator; Option+1…3 or a click inserts one. Runs in a bundled llama.cpp `llama-server`
-  (Metal) built by `scripts/build-mac.sh`; the GGUF model (Gemma 3 4B / 12B, Qwen 3 4B) is chosen and downloaded in the
-  main window, no Ollama needed. Settings in the new `Suggest` config section, which the main window adds to older configs.
+- Main window takes less space: one-line header, tighter setup list, hotkey and language in one row, speech model
+  choice and memory in one row; descriptions moved into tooltips (messages like "Saved" show briefly); the same space
+  around the cards as between them; the last 10 dictations; smaller buttons.
+- The success summary on the indicator stays 3 s instead of 6 (`Ui.ResultSeconds`; existing configs keep their value).
+- macOS: the recording indicator showed no more over full-screen apps once the main window had been opened (until the
+  app was quit): the app became a regular Dock app while the window was open. It now stays a menu bar app. The
+  indicator (and the live hints) appear on the screen with the focused window instead of the one with the mouse, and
+  the log says when macOS keeps them hidden.
+- Speech model choice in the main window: Large v3 or Large v3 Turbo (faster, about half the size); a model that is
+  not there yet is downloaded from the setup checklist.
+- Live hints (macOS, off by default): while the hotkey is held, a local LLM shows the next words of the sentence in
+  the language being spoken, refreshed about every second ("Always", dim, highlighted on a pause) or only on a pause
+  ("When I pause"); for English, a correction line points out a mistake in the last phrase. The audio so far is
+  transcribed as you speak; the hints come from a bundled llama.cpp `llama-server` (Metal) built by
+  `scripts/build-mac.sh`. The GGUF model (Gemma 3 4B / 12B, Qwen 3 4B) is chosen and downloaded in the main window,
+  no Ollama needed. Settings in the new `Suggest` config section, which the main window adds to older configs.
 - macOS version (`WhisperLocal.Mac`): menu bar app with a CGEventTap push-to-talk hotkey, AudioQueue capture,
   whisper-server built with Metal, pasteboard + Cmd+V insertion, LaunchAgent autostart and `--batch` via `afconvert`.
   `scripts/build-mac.sh` builds `WhisperLocal.app`, `scripts/get-model.sh` downloads the model.

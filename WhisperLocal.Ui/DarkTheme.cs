@@ -37,10 +37,10 @@ internal static class DarkTheme
 
     public static TextBlock MutedLabel(string text, double size = 12) => Label(text, size, brush: Muted);
 
-    /// <summary>A section: rounded card with a small uppercase title and an optional control on the right.</summary>
+    /// <summary>A section: rounded card with a small uppercase title (none if empty) and an optional control on the right.</summary>
     public static Border Section(string title, Control content, Control? headerRight = null)
     {
-        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 0, 8) };
+        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 0, 6) };
         header.Children.Add(Label(title.ToUpperInvariant(), 11, FontWeight.SemiBold, Muted));
         if (headerRight != null)
         {
@@ -53,8 +53,8 @@ internal static class DarkTheme
             BorderBrush = CardBorder,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(14, 10, 14, 12),
-            Child = new StackPanel { Children = { header, content } },
+            Padding = new Thickness(12, 8, 12, 10),
+            Child = title.Length == 0 && headerRight == null ? content : new StackPanel { Children = { header, content } },
         };
     }
 
@@ -67,21 +67,21 @@ internal static class DarkTheme
     };
 
     /// <summary>Height shared by buttons and dropdowns, so controls in one row line up.</summary>
-    public const double ControlHeight = 28;
+    public const double ControlHeight = 24;
 
     public static Button Button(string text, Action onClick, bool accent = false, bool small = false)
     {
         var button = new Button
         {
             Content = text,
-            FontSize = 12,
+            FontSize = 11,
             Height = ControlHeight,
-            Padding = new Thickness(small ? 10 : 14, 0),
-            MinWidth = small ? 0 : 88,
+            Padding = new Thickness(small ? 8 : 12, 0),
+            MinWidth = small ? 0 : 72,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            CornerRadius = new CornerRadius(7),
+            CornerRadius = new CornerRadius(6),
         };
         if (accent)
             button.Classes.Add("accent");
@@ -149,8 +149,8 @@ internal static class DarkTheme
             var button = new ToggleButton
             {
                 Content = options[i],
-                FontSize = 12,
-                Padding = new Thickness(10, 3),
+                FontSize = 11,
+                Padding = new Thickness(8, 2),
                 CornerRadius = new CornerRadius(6),
                 IsChecked = i == selected,
             };

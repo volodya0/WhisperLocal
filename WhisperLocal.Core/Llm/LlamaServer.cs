@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using WhisperLocal.Config;
@@ -86,7 +85,9 @@ public sealed class LlamaServer : IDisposable
         if (schema != null)
             body["response_format"] = new { type = "json_schema", json_schema = new { schema } };
 
-        using var response = await _http.PostAsJsonAsync(BaseUrl(c) + "/v1/chat/completions", body, ct);
+        // A plain body with Content-Length (PostAsJsonAsync streams it chunked, which not every server reads)
+        using var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        using var response = await _http.PostAsync(BaseUrl(c) + "/v1/chat/completions", content, ct);
         var json = await response.Content.ReadAsStringAsync(ct);
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException($"llama-server returned {(int)response.StatusCode}: {Truncate(json)}");
@@ -122,7 +123,7 @@ public sealed class LlamaServer : IDisposable
         if (!File.Exists(exe))
             throw new FileNotFoundException($"llama-server not found: {exe}. Run scripts/build-mac.sh, which builds it.");
         if (!File.Exists(model))
-            throw new FileNotFoundException($"Language model not downloaded: {model}. Download it in the main window (Continuation hints).");
+            throw new FileNotFoundException($"Language model not downloaded: {model}. Download it in the main window (Live hints).");
 
         ChildProcessJob.KillOrphans();
 
