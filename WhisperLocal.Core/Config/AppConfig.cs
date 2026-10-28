@@ -303,6 +303,9 @@ public sealed class ListenConfig
     /// <summary>A segment is cut here even without a pause (Whisper takes at most 30 s).</summary>
     public int MaxSegmentSec { get; set; } = 20;
 
+    /// <summary>While a sentence is being spoken, its text so far is shown (greyed) about this often; 0 turns it off.</summary>
+    public int ProvisionalMs { get; set; } = 1000;
+
     public double Temperature { get; set; } = 0.1;
 
     /// <summary>Timeout of one translation once the model is loaded; on timeout the line stays untranslated.</summary>

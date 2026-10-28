@@ -105,6 +105,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _listener.Heard += _listenPanel.ShowLine;
         _listener.Finished += OnListenLineFinished;
         _listener.Failed += _listenPanel.ShowProblem;
+        _listener.Provisional += _listenPanel.ShowProvisional;
         _overlay = new RecordingOverlay(_ui, ShowLastTranscript);
         _completionPanel = new AutocompletePanel();
         _polishPanel = new PolishPanel(_ui, () => _ = InsertProposalAsync(), CopyProposal);

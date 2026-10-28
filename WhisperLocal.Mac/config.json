@@ -163,7 +163,9 @@
     // Relative to ~/Library/Application Support/WhisperLocal, or an absolute path
     "NotesFolder": "notes",
     "PauseMs": 600,
-    "MaxSegmentSec": 20
+    "MaxSegmentSec": 20,
+    // While a sentence is being spoken, show its text so far (greyed) about this often, in ms; 0 = off
+    "ProvisionalMs": 1000
   },
   "Insert": {
     "AppendTrailingSpace": true,

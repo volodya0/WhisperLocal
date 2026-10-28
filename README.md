@@ -87,8 +87,9 @@ WhisperLocal starts writing down everything the Mac plays. The first time, macOS
 Recording**; if it was refused, allow WhisperLocal in System Settings → Privacy & Security → Screen & System Audio
 Recording.
 
-A panel above the indicator shows the last lines as they are recognized. Its menu translates them: **Original**, or
-a language such as Українська or English. When translated, every line is written in both languages. The
+A panel above the indicator shows the last sentences, and the one still being spoken greyed at the bottom. Its menu
+translates them: **Original**, or a language such as Українська or English; the translation then stands next to each
+sentence. When translated, every line is written in both languages. The
 translation uses the grammar check's language model, so download that first. The language you pick is remembered.
 
 The panel stays until you click its **stop** button (pressing the shortcut again only brings it back); the folder

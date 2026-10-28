@@ -93,6 +93,7 @@ CPU; `-ng` runs on the CPU only.
 | `Listen.Languages` | The languages the indicator's menu offers. |
 | `Listen.NotesFolder` | Where the notes files go; relative to the data folder. |
 | `Listen.PauseMs`, `Listen.MaxSegmentSec` | A pause this long ends a segment; without a pause it is cut after this many seconds. |
+| `Listen.ProvisionalMs` | While a sentence is being spoken, its text so far is shown greyed about this often (ms); `0` turns it off. |
 | `Listen.TranslateTimeoutMs`, `Listen.Temperature`, `Listen.TranslatePrompt` | How the language model translates (`{language}` in the prompt is the language name). |
 
 Translation uses the `LocalLlm` model (the one the grammar check uses).

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading.Channels;
 using WhisperLocal.Audio;
 using WhisperLocal.Config;
@@ -13,12 +14,17 @@ public sealed class ListenLine(TimeSpan at, string text)
     public TimeSpan At { get; } = at;
     public string Text { get; } = text;
     public string? Translation { get; set; }
+
+    /// <summary>Recognized and, if wanted, translated: nothing more will change.</summary>
+    public bool Done { get; set; }
 }
 
 /// <summary>
 /// Listening: cuts a continuous audio stream into segments at pauses (or every Listen.MaxSegmentSec), transcribes
 /// them one after another and, when <see cref="TranslateTo"/> is set, translates each with the local LLM. Recognition
-/// and translation run as two stages, so a slow translation never holds up the next segment's text.
+/// and translation run as two stages, so a slow translation never holds up the next segment's text. While a segment
+/// is still being spoken, it is transcribed about every Listen.ProvisionalMs as provisional text, whenever no finished
+/// segment is waiting for recognition.
 /// </summary>
 public sealed class LiveListener
 {
@@ -31,6 +37,15 @@ public sealed class LiveListener
     private readonly Translator _translator;
     private readonly TextFilters _filters = new();
     private volatile string _translateTo = "";
+
+    // Recognition text so far, the prompt for the next segment; all fields below are used on the caller's context
+    private string _previous = "";
+    private int _generation; // the segment being spoken; increases with every cut
+    private int _pendingSegments;
+    private bool _provisionalBusy;
+    private int _provisionalShown = -1; // generation of the provisional text on screen, -1 for none
+    private long _provisionalAt;
+    private double _provisionalUpToMs;
 
     public LiveListener(ConfigManager config, ISpeechToText stt, Translator translator)
     {
@@ -55,6 +70,9 @@ public sealed class LiveListener
     /// <summary>Recognition or translation failed for a segment; listening goes on.</summary>
     public event Action<string>? Failed;
 
+    /// <summary>The segment being spoken, transcribed so far; null when it is gone (recognized, or nothing).</summary>
+    public event Action<string?>? Provisional;
+
     /// <summary>
     /// Runs until <paramref name="ct"/> is cancelled, then finishes the segments already heard before returning.
     /// The events are raised on the caller's context.
@@ -62,7 +80,12 @@ public sealed class LiveListener
     /// <param name="drain">The 16 kHz mono 16-bit PCM captured since the previous call.</param>
     public async Task RunAsync(Func<byte[]> drain, CancellationToken ct)
     {
-        var segments = Channel.CreateUnbounded<(byte[] Pcm, TimeSpan At)>();
+        _previous = "";
+        _generation = 0;
+        _pendingSegments = 0;
+        _provisionalShown = -1;
+        _provisionalUpToMs = 0;
+        var segments = Channel.CreateUnbounded<(byte[] Pcm, TimeSpan At, int Generation)>();
         var lines = Channel.CreateUnbounded<ListenLine>();
         var recognize = RecognizeAsync(segments.Reader, lines.Writer);
         var translate = TranslateAsync(lines.Reader);
@@ -103,16 +126,34 @@ public sealed class LiveListener
                 var pause = silenceMs >= cfg.Listen.PauseMs && durationMs - silenceMs >= 500;
                 if (pause || durationMs >= cfg.Listen.MaxSegmentSec * 1000.0)
                 {
-                    segments.Writer.TryWrite((pcm, bufferAt));
+                    _pendingSegments++;
+                    segments.Writer.TryWrite((pcm, bufferAt, _generation++));
                     bufferAt += TimeSpan.FromMilliseconds(durationMs);
                     buffer.SetLength(0);
+                    _provisionalUpToMs = 0;
+                }
+                else if (cfg.Listen.ProvisionalMs > 0 && !_provisionalBusy && _pendingSegments == 0
+                         && Stopwatch.GetElapsedTime(_provisionalAt).TotalMilliseconds >= cfg.Listen.ProvisionalMs
+                         && durationMs - silenceMs > _provisionalUpToMs + 300)
+                {
+                    // New speech since the last provisional pass
+                    _provisionalUpToMs = durationMs - silenceMs;
+                    _ = ProvisionalAsync(pcm, _generation);
                 }
             }
 
             buffer.Write(drain());
             var rest = buffer.ToArray();
             if (AudioConvert.DurationMs(rest) >= 500 && AudioConvert.SpeechLevelDbfs(rest) >= _config.Current.Filter.MinSpeechDbfs)
-                segments.Writer.TryWrite((rest, bufferAt));
+            {
+                _pendingSegments++;
+                segments.Writer.TryWrite((rest, bufferAt, _generation++));
+            }
+            else
+            {
+                _generation++; // a provisional pass still running is stale
+                ClearProvisional(_generation);
+            }
         }
         finally
         {
@@ -131,33 +172,75 @@ public sealed class LiveListener
         return TimeSpan.FromMilliseconds(AudioConvert.DurationMs(pcm) - keepMs);
     }
 
-    private async Task RecognizeAsync(ChannelReader<(byte[] Pcm, TimeSpan At)> segments, ChannelWriter<ListenLine> lines)
+    /// <summary>Transcribes the segment being spoken; shown only if that segment is still the current one.</summary>
+    private async Task ProvisionalAsync(byte[] pcm, int generation)
     {
-        var previous = "";
+        _provisionalBusy = true;
+        _provisionalAt = Stopwatch.GetTimestamp();
         try
         {
-            await foreach (var (pcm, at) in segments.ReadAllAsync())
+            var cfg = _config.Current;
+            var text = await _stt.TranscribeAsync(AudioConvert.ToWav(pcm), CancellationToken.None, cfg.Listen.Language, Prompt());
+            text = _filters.RemoveHallucinations(text, cfg);
+            if (generation != _generation || text.Length == 0)
+                return;
+            _provisionalShown = generation;
+            Provisional?.Invoke(text);
+        }
+        catch (Exception ex)
+        {
+            // The final pass reports failures; a provisional one is only a preview
+            Log.Debug($"Listening: provisional recognition failed: {ex.Message}");
+        }
+        finally
+        {
+            _provisionalBusy = false;
+            _provisionalAt = Stopwatch.GetTimestamp();
+        }
+    }
+
+    /// <summary>Removes the provisional text if it belongs to <paramref name="generation"/> or an earlier segment.</summary>
+    private void ClearProvisional(int generation)
+    {
+        if (_provisionalShown < 0 || _provisionalShown > generation)
+            return;
+        _provisionalShown = -1;
+        Provisional?.Invoke(null);
+    }
+
+    // The text before this segment helps Whisper continue a sentence cut in the middle
+    private string Prompt() => _previous.Length > PromptChars ? _previous[^PromptChars..] : _previous;
+
+    private async Task RecognizeAsync(ChannelReader<(byte[] Pcm, TimeSpan At, int Generation)> segments, ChannelWriter<ListenLine> lines)
+    {
+        try
+        {
+            await foreach (var (pcm, at, generation) in segments.ReadAllAsync())
             {
                 try
                 {
                     var cfg = _config.Current;
-                    // The text before this segment helps Whisper continue a sentence cut in the middle
-                    var text = await _stt.TranscribeAsync(AudioConvert.ToWav(pcm), CancellationToken.None, cfg.Listen.Language,
-                        previous.Length > PromptChars ? previous[^PromptChars..] : previous);
+                    var text = await _stt.TranscribeAsync(AudioConvert.ToWav(pcm), CancellationToken.None, cfg.Listen.Language, Prompt());
                     text = _filters.RemoveHallucinations(text, cfg);
+                    ClearProvisional(generation);
                     if (text.Length == 0)
                         continue;
                     if (cfg.Logging.LogText)
                         Log.Info($"Heard: {text}");
-                    previous = (previous + " " + text).Trim();
+                    _previous = (_previous + " " + text).Trim();
                     var line = new ListenLine(at, text);
                     Heard?.Invoke(line);
                     lines.TryWrite(line);
                 }
                 catch (Exception ex)
                 {
+                    ClearProvisional(generation);
                     Log.Warn($"Listening: recognition failed: {ex.Message}");
                     Failed?.Invoke(ex.Message);
+                }
+                finally
+                {
+                    _pendingSegments--;
                 }
             }
         }
@@ -193,6 +276,7 @@ public sealed class LiveListener
             context.Enqueue(line.Text);
             if (context.Count > 2)
                 context.Dequeue();
+            line.Done = true;
             Finished?.Invoke(line);
         }
     }

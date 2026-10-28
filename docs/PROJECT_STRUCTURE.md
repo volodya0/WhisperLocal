@@ -144,7 +144,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Ui/Hud.cs` | Shared setup for the floating panels: non-activating, on every desktop and over full-screen apps; logs when macOS keeps one hidden. |
 | `Ui/RecordingOverlay.cs` | Indicator at the bottom: live seconds while recording/processing, then a summary with a Text button; a fresh panel per dictation. |
 | `Ui/PolishPanel.cs` | Grammar check proposal with changed words highlighted; insert, copy or close. |
-| `Ui/ListenPanel.cs` | Listening indicator: elapsed time, the last lines and translations, language menu, notes and stop buttons. |
+| `Ui/ListenPanel.cs` | Listening indicator: elapsed time, the last lines with their translations side by side, the sentence being spoken greyed, language menu, notes and stop buttons. |
 | `Ui/AutocompletePanel.cs` | Ghost-text panel for autocomplete (shelved). |
 | `Ui/ActionTarget.cs` | One Objective-C object that receives menu and button clicks and dispatches them by tag. |
 | `Ui/Dialogs.cs` | Native alerts, notifications and opening files/URLs. |

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Listening: the sentence still being spoken shows greyed at the bottom of the panel about every second
+  (`Listen.ProvisionalMs`), under the last finished sentences; translations stand next to their sentences, and new
+  lines fade in. The panel is wider.
 - macOS 14.2+: notes from what the Mac plays. Left Control + Left Option + L (`Listen.Hotkey`) starts transcribing
   system audio (a call, a video) into a Markdown file with times, in `notes/` in the data folder. A panel shows the
   last lines; its menu translates them with the local language model, and translated lines are written in both
