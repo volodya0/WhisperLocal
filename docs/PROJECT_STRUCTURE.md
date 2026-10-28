@@ -68,6 +68,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Llm/LlamaServer.cs` | Runs bundled `llama-server` as a child process on demand and talks to its HTTP API; load/unload, memory use. |
 | `Llm/LlmModels.cs` | Catalog of GGUF models offered in the main window (Gemma 3 4B/12B, Qwen 3 4B) with download links. |
 | `Llm/Polisher.cs` | Grammar check: asks the language model for a corrected version of a finished dictation. |
+| `Llm/Translator.cs` | Listening: translates one transcript segment with the language model; language names. |
 | `Llm/Autocompleter.cs` | Autocomplete (shelved): continues the live transcript as plain text. |
 | `Native/ChildProcessJob.cs` | Makes sure `whisper-server`/`llama-server` never outlive the app (Windows job object; pid file + cleanup elsewhere). |
 | `Native/JobObjectMethods.cs` | P/Invoke declarations for the Windows job object API. |
@@ -75,6 +76,8 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Pipeline/DictationHistory.cs` | Last 1000 dictations with timings, in `history.jsonl`. |
 | `Pipeline/DictationStats.cs` | Lifetime statistics (today / 7 days / all time) in `stats.json`. |
 | `Pipeline/LiveAutocomplete.cs` | Autocomplete loop while the hotkey is held (shelved). |
+| `Pipeline/LiveListener.cs` | Listening: cuts the system audio stream into segments at pauses, transcribes and optionally translates them. |
+| `Pipeline/ListenNotes.cs` | Listening: the Markdown notes file of a session, written line by line. |
 | `Stt/ISpeechToText.cs` | Speech-to-text interface: warm up, transcribe, unload. |
 | `Stt/WhisperServerStt.cs` | Runs bundled `whisper-server` (Vulkan on Windows, Metal on macOS) on demand and transcribes over HTTP; language detection with an allowed list. |
 | `Stt/WhisperModels.cs` | Catalog of Whisper models offered in the main window (Large v3, Large v3 Turbo). |
@@ -129,6 +132,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `MenuBarApp.cs` | The app: menu bar item, hotkey → record → pipeline → paste, indicator, grammar check, downloads, updates, idle unload; implements `IAppHost` for the shared windows. |
 | `LaunchAgent.cs` | Start at login via `~/Library/LaunchAgents`. |
 | `Audio/MacAudioRecorder.cs` | AudioQueue microphone capture straight to 16 kHz mono PCM; microphone permission state. |
+| `Audio/SystemAudioTap.cs` | Listening: captures what the Mac plays through a Core Audio process tap (macOS 14.2+), as 16 kHz mono PCM. |
 | `Audio/MacAudioFile.cs` | Decodes audio files with `afconvert` (for `--batch`). |
 | `Input/HotkeyTap.cs` | Push-to-talk hotkey via CGEventTap (needs Accessibility); also records new hotkeys for the main window. |
 | `Interop/ObjC.cs` | Minimal Objective-C runtime bindings: classes, selectors, typed `objc_msgSend`, strings, autorelease pools. |
@@ -140,6 +144,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Ui/Hud.cs` | Shared setup for the floating panels: non-activating, on every desktop and over full-screen apps; logs when macOS keeps one hidden. |
 | `Ui/RecordingOverlay.cs` | Indicator at the bottom: live seconds while recording/processing, then a summary with a Text button; a fresh panel per dictation. |
 | `Ui/PolishPanel.cs` | Grammar check proposal with changed words highlighted; insert, copy or close. |
+| `Ui/ListenPanel.cs` | Listening indicator: elapsed time, the last lines and translations, language menu, notes and stop buttons. |
 | `Ui/AutocompletePanel.cs` | Ghost-text panel for autocomplete (shelved). |
 | `Ui/ActionTarget.cs` | One Objective-C object that receives menu and button clicks and dispatches them by tag. |
 | `Ui/Dialogs.cs` | Native alerts, notifications and opening files/URLs. |

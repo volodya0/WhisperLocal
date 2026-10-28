@@ -57,19 +57,20 @@ public sealed class WhisperServerStt : ISpeechToText
         }
     }
 
-    public async Task<string> TranscribeAsync(byte[] wav, CancellationToken ct)
+    public async Task<string> TranscribeAsync(byte[] wav, CancellationToken ct, string? language = null, string? prompt = null)
     {
         var c = _config.Current.Whisper;
+        prompt ??= c.InitialPrompt;
         await WarmUpAsync(ct);
         LastUsedUtc = DateTime.UtcNow;
 
         // "uk,en": detect the language, but only accept the listed ones. A fixed language makes Whisper write
         // that language even for speech in another one (in effect translating it), so English came out Ukrainian.
-        var languages = ParseLanguages(c.Language);
+        var languages = ParseLanguages(language ?? c.Language);
         string text;
         if (languages.Count > 1)
         {
-            var (detectedText, detected) = await RequestAsync(c, wav, "auto", ct);
+            var (detectedText, detected) = await RequestAsync(c, wav, "auto", prompt, ct);
             var match = languages.FirstOrDefault(l => SameLanguage(l, detected));
             if (match != null)
             {
@@ -80,12 +81,12 @@ public sealed class WhisperServerStt : ISpeechToText
             {
                 // Typically a short Ukrainian phrase taken for Russian: transcribe again in the main language
                 Log.Info($"Detected language '{detected}' is not in Whisper.Language ({c.Language}), transcribing as '{languages[0]}'");
-                (text, _) = await RequestAsync(c, wav, languages[0], ct);
+                (text, _) = await RequestAsync(c, wav, languages[0], prompt, ct);
             }
         }
         else
         {
-            (text, _) = await RequestAsync(c, wav, languages[0], ct);
+            (text, _) = await RequestAsync(c, wav, languages[0], prompt, ct);
         }
 
         LastUsedUtc = DateTime.UtcNow;
@@ -93,7 +94,8 @@ public sealed class WhisperServerStt : ISpeechToText
     }
 
     /// <summary>One /inference call; returns the text and the language whisper-server reports (full name, e.g. "english").</summary>
-    private async Task<(string Text, string Language)> RequestAsync(WhisperConfig c, byte[] wav, string language, CancellationToken ct)
+    private async Task<(string Text, string Language)> RequestAsync(WhisperConfig c, byte[] wav, string language, string prompt,
+        CancellationToken ct)
     {
         using var form = new MultipartFormDataContent();
         var file = new ByteArrayContent(wav);
@@ -104,8 +106,8 @@ public sealed class WhisperServerStt : ISpeechToText
         form.Add(new StringContent("verbose_json"), "response_format");
         form.Add(new StringContent("true"), "no_language_probabilities");
         form.Add(new StringContent(language), "language");
-        if (!string.IsNullOrWhiteSpace(c.InitialPrompt))
-            form.Add(new StringContent(c.InitialPrompt), "prompt");
+        if (!string.IsNullOrWhiteSpace(prompt))
+            form.Add(new StringContent(prompt), "prompt");
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(c.RequestTimeoutSec));

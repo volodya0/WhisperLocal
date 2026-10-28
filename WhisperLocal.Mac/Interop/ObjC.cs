@@ -77,6 +77,7 @@ internal static class ObjC
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern IntPtr Send(IntPtr receiver, IntPtr selector, NSRect a, [MarshalAs(UnmanagedType.I1)] bool b);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern IntPtr Send(IntPtr receiver, IntPtr selector, NSRect a, ulong b, ulong c, [MarshalAs(UnmanagedType.I1)] bool d);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] [return: MarshalAs(UnmanagedType.I1)] public static extern bool SendBool(IntPtr receiver, IntPtr selector);
+    [DllImport(Lib, EntryPoint = "objc_msgSend")] [return: MarshalAs(UnmanagedType.I1)] public static extern bool SendBool(IntPtr receiver, IntPtr selector, IntPtr a);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] [return: MarshalAs(UnmanagedType.I1)] public static extern bool SendBool(IntPtr receiver, IntPtr selector, IntPtr a, IntPtr b);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern long SendLong(IntPtr receiver, IntPtr selector);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern long SendLong(IntPtr receiver, IntPtr selector, IntPtr a);

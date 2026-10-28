@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- macOS 14.2+: notes from what the Mac plays. Left Control + Left Option + L (`Listen.Hotkey`) starts transcribing
+  system audio (a call, a video) into a Markdown file with times, in `notes/` in the data folder. A panel shows the
+  last lines; its menu translates them with the local language model, and translated lines are written in both
+  languages. It runs until the panel's stop button is clicked; the menu has "Listen to System Audio" and "Open Notes
+  Folder".
 - Windows: the shared main window (setup checklist with model download, hotkey selector with Record…, language,
   speech model and memory, recent dictations), history, statistics and transcript windows; "Open WhisperLocal…" and
   "Show Last Transcript" in the tray menu (double-click the icon for the main window). Dictations are kept in the

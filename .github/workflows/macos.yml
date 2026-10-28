@@ -2,6 +2,7 @@
 # folder), on every push to any branch and every pull request: as workflow artifacts on every run, and as one GitHub
 # Release with both downloads, which "Check for Updates" in the apps looks at:
 # - every push to the main branch is released automatically as v1.0.<run number>;
+#   for now claude/laughing-bohr-1272ks too (listening / notes), until it is merged into main;
 # - a pushed tag like v1.2.0 is released with that version.
 # (The file keeps its old name: the run number, and so the version, continues from it.)
 #
@@ -43,7 +44,7 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
-          elif [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_NAME" == main ]]; then
+          elif [[ "$GITHUB_EVENT_NAME" == push && ( "$GITHUB_REF_NAME" == main || "$GITHUB_REF_NAME" == claude/laughing-bohr-1272ks ) ]]; then
             VERSION="1.0.$GITHUB_RUN_NUMBER"
           fi
           if [[ -n "${VERSION:-}" ]]; then
@@ -132,7 +133,7 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          elif [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_NAME" == main ]]; then
+          elif [[ "$GITHUB_EVENT_NAME" == push && ( "$GITHUB_REF_NAME" == main || "$GITHUB_REF_NAME" == claude/laughing-bohr-1272ks ) ]]; then
             echo "VERSION=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
           fi
 

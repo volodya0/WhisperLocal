@@ -140,6 +140,43 @@ internal static unsafe class MacNative
     public static extern int AudioObjectGetPropertyData(uint objectId, in AudioObjectPropertyAddress address,
         uint qualifierSize, IntPtr qualifier, ref uint dataSize, void* data);
 
+    // CoreAudio: system audio capture through a process tap (macOS 14.2+) and an aggregate device
+    public const uint kAudioHardwarePropertyDefaultSystemOutputDevice = 0x734F7574; // 'sOut'
+    public const uint kAudioTapPropertyFormat = 0x74666D74; // 'tfmt'
+    public const uint kAudioFormatFlagIsFloat = 0x1;
+    public const uint kAudioFormatFlagIsNonInterleaved = 0x20;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AudioBuffer
+    {
+        public uint NumberChannels;
+        public uint DataByteSize;
+        public IntPtr Data;
+    }
+
+    /// <summary>AudioBufferList's header; its AudioBuffer array starts 8 bytes in (after the count and padding).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AudioBufferList
+    {
+        public uint NumberBuffers;
+        private readonly uint _padding;
+
+        public static AudioBuffer* Buffers(AudioBufferList* list) => (AudioBuffer*)((byte*)list + 8);
+    }
+
+    [DllImport(CoreAudio)] public static extern int AudioHardwareCreateProcessTap(IntPtr description, out uint tapId);
+    [DllImport(CoreAudio)] public static extern int AudioHardwareDestroyProcessTap(uint tapId);
+    [DllImport(CoreAudio)] public static extern int AudioHardwareCreateAggregateDevice(IntPtr description, out uint deviceId);
+    [DllImport(CoreAudio)] public static extern int AudioHardwareDestroyAggregateDevice(uint deviceId);
+
+    [DllImport(CoreAudio)]
+    public static extern int AudioDeviceCreateIOProcID(uint deviceId,
+        delegate* unmanaged<uint, IntPtr, AudioBufferList*, IntPtr, IntPtr, IntPtr, IntPtr, int> proc, IntPtr clientData, out IntPtr procId);
+
+    [DllImport(CoreAudio)] public static extern int AudioDeviceDestroyIOProcID(uint deviceId, IntPtr procId);
+    [DllImport(CoreAudio)] public static extern int AudioDeviceStart(uint deviceId, IntPtr procId);
+    [DllImport(CoreAudio)] public static extern int AudioDeviceStop(uint deviceId, IntPtr procId);
+
     public static void LoadFramework(string name) =>
         NativeLibrary.Load($"/System/Library/Frameworks/{name}.framework/{name}");
 }

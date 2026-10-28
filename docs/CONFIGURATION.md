@@ -83,6 +83,20 @@ CPU; `-ng` runs on the CPU only.
 | `LocalLlm.ModelPath` | The GGUF model (chosen and downloaded in the main window; any instruction-tuned GGUF works). |
 | `LocalLlm.ServerExe`, `Port`, `ExtraArgs` | The bundled `llama-server` and how it runs. |
 
+## Listening: notes from system audio (macOS 14.2+)
+
+| Setting | Meaning |
+|---|---|
+| `Listen.Hotkey` | Starts listening (key names as for `Hotkey.Key`); `""` turns the shortcut off. Default `LeftControl+LeftOption+L`. |
+| `Listen.Language` | Language of what is heard: `"auto"` detects it per segment, a code (`"en"`) fixes it. |
+| `Listen.TranslateTo` | Translate into this language (`"uk"`, `"en"`, …), `""` for the original only. Set from the indicator's menu. |
+| `Listen.Languages` | The languages the indicator's menu offers. |
+| `Listen.NotesFolder` | Where the notes files go; relative to the data folder. |
+| `Listen.PauseMs`, `Listen.MaxSegmentSec` | A pause this long ends a segment; without a pause it is cut after this many seconds. |
+| `Listen.TranslateTimeoutMs`, `Listen.Temperature`, `Listen.TranslatePrompt` | How the language model translates (`{language}` in the prompt is the language name). |
+
+Translation uses the `LocalLlm` model (the one the grammar check uses).
+
 ## LLM cleanup through Ollama (optional)
 
 The `Llm` section sends each transcript to a local [Ollama](https://ollama.com) server to remove filler words and

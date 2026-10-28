@@ -37,6 +37,7 @@ public sealed class AppConfig
     public LocalLlmConfig LocalLlm { get; set; } = new();
     public AutocompleteConfig Autocomplete { get; set; } = new();
     public PolishConfig Polish { get; set; } = new();
+    public ListenConfig Listen { get; set; } = new();
     public InsertConfig Insert { get; set; } = new();
     public UiConfig Ui { get; set; } = new();
     public LoggingConfig Logging { get; set; } = new();
@@ -273,6 +274,42 @@ public sealed class PolishConfig
     public int TimeoutMs { get; set; } = 15000;
 
     public string SystemPrompt { get; set; } = DefaultPrompts.Polish;
+}
+
+/// <summary>
+/// Listening (macOS 14.2+): a shortcut starts transcribing system audio (a call, a video) into a notes file, optionally
+/// translated by the local LLM; it runs until the indicator's stop button is clicked.
+/// </summary>
+public sealed class ListenConfig
+{
+    /// <summary>Starts listening; key names as in Hotkey.Key. Pressing it again while listening only shows the indicator.</summary>
+    public string Hotkey { get; set; } = "LeftControl+LeftOption+L";
+
+    /// <summary>Language of what is heard: "auto" detects it per segment, a code ("en") fixes it.</summary>
+    public string Language { get; set; } = "auto";
+
+    /// <summary>Translate into this language ("uk", "en", …); "" keeps the original only. Changed from the indicator.</summary>
+    public string TranslateTo { get; set; } = "";
+
+    /// <summary>Languages offered in the indicator's menu.</summary>
+    public List<string> Languages { get; set; } = ["uk", "en", "de", "pl", "es", "fr"];
+
+    /// <summary>Folder of the notes files; relative to the data directory.</summary>
+    public string NotesFolder { get; set; } = "notes";
+
+    /// <summary>A pause this long ends a segment.</summary>
+    public int PauseMs { get; set; } = 600;
+
+    /// <summary>A segment is cut here even without a pause (Whisper takes at most 30 s).</summary>
+    public int MaxSegmentSec { get; set; } = 20;
+
+    public double Temperature { get; set; } = 0.1;
+
+    /// <summary>Timeout of one translation once the model is loaded; on timeout the line stays untranslated.</summary>
+    public int TranslateTimeoutMs { get; set; } = 20000;
+
+    /// <summary>{language} is replaced with the language name.</summary>
+    public string TranslatePrompt { get; set; } = DefaultPrompts.Translate;
 }
 
 public sealed class InsertConfig

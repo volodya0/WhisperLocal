@@ -132,7 +132,7 @@ internal sealed class PolishPanel : IDisposable
         Send(Class("NSColor"), Sel("colorWithSRGBRed:green:blue:alpha:"), c.R, c.G, c.B, 1.0);
 
     /// <summary>A borderless button with an SF Symbol (macOS 11+), or its title where the symbol is missing.</summary>
-    private static IntPtr IconButton(string symbol, string title, string tooltip, Action action)
+    internal static IntPtr IconButton(string symbol, string title, string tooltip, Action action)
     {
         var image = Send(Class("NSImage"), Sel("imageWithSystemSymbolName:accessibilityDescription:"), Str(symbol), Str(title));
         var button = image != IntPtr.Zero

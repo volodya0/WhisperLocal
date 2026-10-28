@@ -80,12 +80,30 @@ Turn it on in the main window and download its model (Gemma 3 4B, 2.5 GB, is the
 small panel proposes a corrected version with the changed words in green. Its buttons replace what was pasted with
 the corrected text or copy it; or just ignore it — it goes away by itself. It runs locally too.
 
+## Notes from what the Mac plays (macOS 14.2 or later)
+
+For a call, a lecture or a video: press **Left Control + Left Option + L** (`Listen.Hotkey` in the config) and
+WhisperLocal starts writing down everything the Mac plays. The first time, macOS asks to allow **System Audio
+Recording**; if it was refused, allow WhisperLocal in System Settings → Privacy & Security → Screen & System Audio
+Recording.
+
+A panel above the indicator shows the last lines as they are recognized. Its menu translates them: **Original**, or
+a language such as Українська or English. When translated, every line is written in both languages. The
+translation uses the grammar check's language model, so download that first. The language you pick is remembered.
+
+The panel stays until you click its **stop** button (pressing the shortcut again only brings it back); the folder
+button opens the notes. Each session is a Markdown file with times in
+`~/Library/Application Support/WhisperLocal/notes` (menu → **Open Notes Folder**). Your own microphone is not
+recorded.
+
 ## Menu
 
 The menu bar icon on macOS, the tray icon on Windows:
 
 - **Open WhisperLocal…** — the main window.
 - **Show Last Transcript** — the text of the last dictation.
+- **Listen to System Audio** / **Stop Listening** (macOS) — the same as the listening shortcut and the stop button.
+- **Open Notes Folder** (macOS) — where the notes are saved.
 - **Check for Updates…** — looks for a new version and, if you agree, installs it and restarts. Your settings,
   models and history stay.
 - **Enabled** — pause or resume dictation.
@@ -109,7 +127,8 @@ The menu bar icon on macOS, the tray icon on Windows:
 ## Privacy
 
 Audio and text never leave your computer. The only network access is downloading models from HuggingFace and,
-when you ask for it, checking GitHub for updates. Recordings are not saved. The log and the dictation history keep
+when you ask for it, checking GitHub for updates. Recordings are not saved (listening keeps only the text, in its
+notes). The log and the dictation history keep
 the text of your dictations to help with troubleshooting; set `Logging.LogText` to `false` in the config to stop
 that.
 
