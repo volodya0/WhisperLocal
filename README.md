@@ -76,10 +76,11 @@ from Applications again):
 - language model: autocomplete (Off / Always / When I pause), grammar check on/off, the model (Gemma 3 4B,
   Gemma 3 12B or Qwen 3 4B) with an in-app download, and whether it is loaded;
 - buttons for the config, the log, the logs and data folders;
-- statistics for today, the last 7 days and all time: dictations, words, speaking time and speaking rate
-  (`stats.json` in the data folder, never trimmed; only dictations that produced text count);
-- recent dictations with recording, processing and recognition times, word counts and averages
-  (the last 20 in `history.jsonl` in the data folder; the text is kept only with `Logging.LogText`).
+- the last 3 dictations with recording, processing and recognition times and word counts;
+- All history opens a window with every kept dictation, grouped by day, with averages
+  (the last 20 in `history.jsonl` in the data folder; the text is kept only with `Logging.LogText`);
+- Statistics opens a window with today, the last 7 days and all time: dictations, words, speaking time and speaking
+  rate (`stats.json` in the data folder, never trimmed; only dictations that produced text count).
 
 The indicator at the bottom of the screen counts seconds while recording and processing, then shows a summary
 (recording time, processing time, words) for 3 seconds (`Ui.ResultSeconds`) — longer while the mouse is over it — with a **Text**

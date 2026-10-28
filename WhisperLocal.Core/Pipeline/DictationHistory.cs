@@ -11,7 +11,7 @@ public sealed record DictationRecord(
 /// <summary>The last dictations with their timings, kept in a small JSON-lines file between runs.</summary>
 public sealed class DictationHistory
 {
-    private const int Keep = 20;
+    public const int Keep = 20;
 
     private readonly object _sync = new();
     private readonly string _file;

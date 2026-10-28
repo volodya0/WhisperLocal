@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Main window shows only the last 3 dictations; the full history (grouped by day, with averages) and the statistics
+  open in their own windows from the All history and Statistics buttons.
 - macOS: when no text input is focused (a file list, the desktop), the dictation is not pasted into nothing: the
   transcript window opens with the text to edit and copy (`Insert.ShowWhenNoTextField`, on by default).
 - Main window takes less space: one-line header, tighter setup list, hotkey and language in one row, speech model

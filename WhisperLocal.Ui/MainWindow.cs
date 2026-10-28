@@ -13,15 +13,18 @@ using WhisperLocal.Stt;
 namespace WhisperLocal.Ui;
 
 /// <summary>
-/// The app's window: status header, setup checklist, hotkey selector, model memory, language model, statistics,
-/// recent dictations and files. Dark, card-based. Closing only hides it; it refreshes itself while visible.
+/// The app's window: status header, setup checklist, hotkey selector, model memory, language model,
+/// the last few dictations (full history and statistics open in their own windows) and files.
+/// Dark, card-based. Closing only hides it; it refreshes itself while visible.
 /// </summary>
 public sealed class MainWindow : Window
 {
-    private const int HistoryRows = 10;
+    private const int HistoryRows = 3;
 
     private readonly IAppHost _host;
     private readonly TranscriptWindow _transcript;
+    private readonly HistoryWindow _historyWindow;
+    private readonly StatsWindow _statsWindow;
 
     private readonly Ellipse _statusDot = DarkTheme.Dot(DarkTheme.Idle);
     private readonly TextBlock _status = DarkTheme.MutedLabel("", 13);
@@ -46,8 +49,6 @@ public sealed class MainWindow : Window
     private readonly ComboBox _hintModels = DarkTheme.Dropdown(290);
     private readonly Note _hintNote = new();
     private readonly StackPanel _hintStatus = new() { Spacing = 2 };
-    private readonly Grid _statTiles = new() { ColumnDefinitions = new ColumnDefinitions("*,*,*,*") };
-    private readonly TextBlock _statsNote = DarkTheme.MutedLabel("");
     private readonly StackPanel _history = new();
     private readonly TextBlock _historyNote = DarkTheme.MutedLabel("");
     private readonly DispatcherTimer _refresh = new() { Interval = TimeSpan.FromSeconds(1.5) };
@@ -70,13 +71,14 @@ public sealed class MainWindow : Window
     private bool _updatingHotkeys;
     private bool _recording;
     private bool _historyDirty = true;
-    private int _statsPeriod; // 0 today, 1 last 7 days, 2 all time
     private bool _allowClose;
 
     public MainWindow(IAppHost host, TranscriptWindow transcript)
     {
         _host = host;
         _transcript = transcript;
+        _historyWindow = new HistoryWindow(host, transcript);
+        _statsWindow = new StatsWindow(host);
         Title = "WhisperLocal";
         Width = 720;
         Height = 760;
@@ -103,13 +105,17 @@ public sealed class MainWindow : Window
                     DarkTheme.Section("", HotkeyAndLanguageSection()),
                     DarkTheme.Section("Speech model", MemorySection()),
                     DarkTheme.Section("Language model", LanguageModelSection()),
-                    DarkTheme.Section("Statistics", StatsSection(),
-                        DarkTheme.Segmented(["Today", "7 days", "All time"], _statsPeriod, i =>
+                    DarkTheme.Section("Recent dictations", new StackPanel { Spacing = 4, Children = { _history, _historyNote } },
+                        new StackPanel
                         {
-                            _statsPeriod = i;
-                            RefreshStats();
-                        })),
-                    DarkTheme.Section("Recent dictations", new StackPanel { Spacing = 4, Children = { _history, _historyNote } }),
+                            Orientation = Orientation.Horizontal,
+                            Spacing = 8,
+                            Children =
+                            {
+                                DarkTheme.Button("Statistics", _statsWindow.ShowAndActivate, small: true),
+                                DarkTheme.Button("All history", _historyWindow.ShowAndActivate, small: true),
+                            },
+                        }),
                     DarkTheme.Section("Files", FilesSection()),
                 },
             },
@@ -698,121 +704,23 @@ public sealed class MainWindow : Window
         }
     }
 
-    // ---- Statistics ----
-
-    private Control StatsSection() => new StackPanel { Spacing = 8, Children = { _statTiles, _statsNote } };
-
-    private void RefreshStats()
-    {
-        var totals = _statsPeriod switch
-        {
-            0 => _host.Stats.Today(),
-            1 => _host.Stats.LastDays(7),
-            _ => _host.Stats.AllTime(),
-        };
-
-        _statTiles.Children.Clear();
-        (string Value, string Label)[] tiles =
-        [
-            (totals.Dictations.ToString("N0"), "dictations"),
-            (totals.Words.ToString("N0"), "words"),
-            (FormatDuration(totals.SpeakingSec), "speaking"),
-            (totals.SpeakingSec > 0 ? totals.WordsPerMinute.ToString("F0") : "–", "words / min"),
-        ];
-        for (var i = 0; i < tiles.Length; i++)
-        {
-            var tile = new StackPanel
-            {
-                Spacing = 0,
-                Children =
-                {
-                    DarkTheme.Label(tiles[i].Value, 20, FontWeight.SemiBold),
-                    DarkTheme.MutedLabel(tiles[i].Label),
-                },
-            };
-            Grid.SetColumn(tile, i);
-            _statTiles.Children.Add(tile);
-        }
-
-        var all = _host.Stats.AllTime();
-        // Typing at ~40 words/min is a common average
-        var saved = all.Words / 40.0 * 60 - all.SpeakingSec - all.ProcessingSec;
-        _statsNote.Text = $"Counting since {_host.Stats.Since.ToLocalTime():d}" +
-                          (saved > 60 ? $" · about {FormatDuration(saved)} saved compared with typing at 40 words/min" : "");
-    }
-
     // ---- Recent dictations ----
 
     private void RefreshHistory()
     {
         _historyDirty = false;
-        RefreshStats();
         _history.Children.Clear();
 
         var records = _host.History.Recent(HistoryRows);
-        if (records.Count == 0)
-        {
-            _historyNote.Text = "Nothing yet. Hold the hotkey anywhere, speak, release.";
-            return;
-        }
-
+        _historyNote.IsVisible = records.Count == 0;
+        _historyNote.Text = "Nothing yet. Hold the hotkey anywhere, speak, release.";
         for (var i = 0; i < records.Count; i++)
         {
             if (i > 0)
                 _history.Children.Add(DarkTheme.Separator());
-            _history.Children.Add(HistoryRow(records[i]));
+            _history.Children.Add(HistoryWindow.Row(records[i], _transcript));
         }
-
-        var spoken = records.Where(r => r.Words > 0).ToList();
-        if (spoken.Count == 0)
-        {
-            _historyNote.Text = "";
-            return;
-        }
-        var avgStt = spoken.Average(r => r.SttSec);
-        var speed = avgStt > 0 ? spoken.Average(r => r.RecordSec) / avgStt : 0;
-        _historyNote.Text = $"Average of the last {spoken.Count}: processing {spoken.Average(r => r.ProcessSec):F1} s, " +
-                            $"recognition {avgStt:F1} s ({speed:F0}× real time)";
-        _historyNote.Margin = new Thickness(0, 4, 0, 0);
     }
-
-    private Control HistoryRow(DictationRecord r)
-    {
-        var hasText = !string.IsNullOrEmpty(r.Text);
-        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("54,*,Auto,Auto") };
-
-        row.Children.Add(DarkTheme.Label(r.Time.ToLocalTime().ToString("HH:mm"), 12, brush: DarkTheme.Subtle));
-
-        var text = new TextBlock
-        {
-            Text = hasText ? r.Text : (r.Words > 0 ? $"{r.Words} words (text not kept)" : NoteText(r.Note)),
-            FontSize = 13,
-            Foreground = hasText ? DarkTheme.Text : DarkTheme.Muted,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        if (hasText)
-            ToolTip.SetTip(text, string.IsNullOrEmpty(r.App) ? r.Text : $"{r.App}: {r.Text}");
-        Grid.SetColumn(text, 1);
-        row.Children.Add(text);
-
-        var meta = DarkTheme.Label($"{r.RecordSec:F1} s · {r.ProcessSec:F1} s · {r.Words} w", 12, brush: DarkTheme.Subtle);
-        meta.Margin = new Thickness(14, 0, 8, 0);
-        ToolTip.SetTip(meta, $"Recording {r.RecordSec:F1} s, processing {r.ProcessSec:F1} s (recognition {r.SttSec:F1} s), {r.Words} words");
-        Grid.SetColumn(meta, 2);
-        row.Children.Add(meta);
-
-        if (hasText)
-        {
-            var full = r.Text;
-            var show = DarkTheme.Button("Show", () => _transcript.ShowText(full), small: true);
-            Grid.SetColumn(show, 3);
-            row.Children.Add(show);
-        }
-        return row;
-    }
-
-    private static string NoteText(string note) => string.IsNullOrEmpty(note) ? "No speech" : char.ToUpper(note[0]) + note[1..];
 
     // ---- Files ----
 
@@ -835,22 +743,12 @@ public sealed class MainWindow : Window
         return new StackPanel { Spacing = 6, Children = { buttons, path } };
     }
 
-    // ---- Helpers ----
-
-    private static string FormatDuration(double seconds)
-    {
-        var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
-        if (t.TotalHours >= 1)
-            return $"{(int)t.TotalHours} h {t.Minutes} min";
-        if (t.TotalMinutes >= 1)
-            return $"{t.Minutes} min {t.Seconds} s";
-        return $"{t.Seconds} s";
-    }
-
     public void CloseForGood()
     {
         _allowClose = true;
         _refresh.Stop();
+        _historyWindow.CloseForGood();
+        _statsWindow.CloseForGood();
         Close();
     }
 }
