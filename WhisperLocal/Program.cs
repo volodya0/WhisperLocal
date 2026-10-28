@@ -1,4 +1,6 @@
+using WhisperLocal.Audio;
 using WhisperLocal.Config;
+using WhisperLocal.Native;
 
 namespace WhisperLocal;
 
@@ -16,7 +18,10 @@ internal static class Program
         };
 
         if (args.Length > 0 && args[0].Equals("--batch", StringComparison.OrdinalIgnoreCase))
-            return BatchRunner.RunAsync(args).GetAwaiter().GetResult();
+        {
+            NativeMethods.AttachConsole(NativeMethods.ATTACH_PARENT_PROCESS);
+            return BatchRunner.RunAsync(args, AudioFile.Load).GetAwaiter().GetResult();
+        }
 
         using var mutex = new Mutex(true, @"Local\WhisperLocal.SingleInstance", out var createdNew);
         if (!createdNew)

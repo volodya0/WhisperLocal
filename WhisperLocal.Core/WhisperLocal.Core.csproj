@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Platform-neutral part shared by the Windows (WhisperLocal) and macOS (WhisperLocal.Mac) apps -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>WhisperLocal</RootNamespace>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+  </ItemGroup>
+
+  <!-- Both apps (WhisperLocal and WhisperLocal.Mac) build an assembly named WhisperLocal; WhisperLocal.Ui is the shared UI -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="WhisperLocal" />
+    <InternalsVisibleTo Include="WhisperLocal.Ui" />
+  </ItemGroup>
+
+</Project>

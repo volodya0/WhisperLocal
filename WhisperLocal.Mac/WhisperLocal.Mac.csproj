@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    macOS menu bar app. Plain net8.0 with direct AppKit/CoreGraphics/AudioToolbox interop, so it builds
+    with the .NET SDK alone (no Xcode, no macOS workload); the windows come from WhisperLocal.Ui (Avalonia).
+    scripts/build-mac.sh wraps it into WhisperLocal.app.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>WhisperLocal.Mac</RootNamespace>
+    <AssemblyName>WhisperLocal</AssemblyName>
+    <Version>1.0.0</Version>
+    <Product>WhisperLocal</Product>
+    <Description>Local push-to-talk dictation (whisper.cpp, Metal)</Description>
+  </PropertyGroup>
+
+  <!-- "owner/repo" whose GitHub releases "Check for Updates" looks at; set by scripts/build-mac.sh -->
+  <ItemGroup Condition="'$(UpdateRepository)' != ''">
+    <AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WhisperLocal.Core\WhisperLocal.Core.csproj" />
+    <ProjectReference Include="..\WhisperLocal.Ui\WhisperLocal.Ui.csproj" />
+  </ItemGroup>
+
+  <!-- Avalonia runs the app (the shared windows); the menu bar item, indicator, hotkey, audio and paste stay native -->
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+  </ItemGroup>
+
+  <!-- whisper-server built by scripts/build-mac.sh (Runtime/whisper/* → <output>/whisper/*), not in git -->
+  <ItemGroup>
+    <None Include="Runtime\**\*" Link="%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Menu bar icons (scripts/make-mac-icons.py); AppIcon.icns goes into the bundle via scripts/build-mac.sh -->
+  <ItemGroup>
+    <None Include="Resources\MenuBarIcon*.png" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Default settings; copied to ~/Library/Application Support/WhisperLocal/config.json when newer -->
+  <ItemGroup>
+    <None Update="config.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Cross-platform windows (Avalonia): the main window (setup, hotkey, memory, files, recent dictations), the
+    history, statistics and transcript windows. Platform apps implement IAppHost; the tray/menu bar icon, the recording indicator (it must never take
+    focus), the hotkey, recording and pasting stay native in each platform project.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>WhisperLocal.Ui</RootNamespace>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WhisperLocal.Core\WhisperLocal.Core.csproj" />
+  </ItemGroup>
+
+</Project>

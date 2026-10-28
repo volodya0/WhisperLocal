@@ -17,6 +17,10 @@
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\WhisperLocal.Core\WhisperLocal.Core.csproj" />
+  </ItemGroup>
+
   <!-- Bundled native runtimes (Runtime\whisper\* → <output>\whisper\*) -->
   <ItemGroup>
     <None Include="Runtime\**\*" Link="%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
