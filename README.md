@@ -43,7 +43,7 @@ Same pipeline, macOS-native pieces: CGEventTap hotkey → AudioQueue capture (16
 
 1. Install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), the Xcode Command Line Tools
    (`xcode-select --install`) and CMake (`brew install cmake`).
-2. Build whisper-server and llama-server (autocomplete, grammar check) with Metal, and the app bundle:
+2. Build whisper-server and llama-server (grammar check) with Metal, and the app bundle:
    ```
    scripts/build-mac.sh --install        # → artifacts/WhisperLocal.app, copied to ~/Applications
    scripts/build-mac.sh --dmg            # or a drag-to-Applications disk image to share
@@ -71,9 +71,9 @@ from Applications again):
   Ukrainian only, English only or any (`Whisper.Language`: `"uk,en"`, `"uk,en,ru"`, `"uk"`, `"en"`, `"auto"`; any list of
   codes works, the first is the fallback). A single fixed language makes Whisper write speech in
   another language translated into it;
-- speech model: Large v3 (most accurate) or Large v3 Turbo (several times faster, almost as accurate; best with
-  autocomplete), downloaded from Setup; whether it is in memory, with Unload / Load;
-- language model: autocomplete (Off / Always / When I pause), grammar check on/off, the model (Gemma 3 4B,
+- speech model: Large v3 (most accurate) or Large v3 Turbo (several times faster, almost as accurate; best on
+  smaller Macs), downloaded from Setup; whether it is in memory, with Unload / Load;
+- language model: grammar check on/off, the model (Gemma 3 4B,
   Gemma 3 12B or Qwen 3 4B) with an in-app download, and whether it is loaded;
 - buttons for the config, the log, the logs and data folders;
 - the last 3 dictations with recording, processing and recognition times and word counts;
@@ -88,23 +88,15 @@ button that opens the transcript with a Copy button ("Show Last Transcript" in t
 input is focused (a file list in Finder, the desktop), nothing is pasted: the transcript opens instead, editable, to
 copy (`Insert.ShowWhenNoTextField`).
 
-**Autocomplete** (off by default; "Always" or "When I pause" in the main window), like code completion: while you
-hold the hotkey, the panel above the indicator shows your last words and, in grey, how the sentence most likely
-continues (up to 12 words, `Autocomplete.MaxWords`). Just say it, or ignore it and go on. With "Always" it refreshes
-about every second while new speech comes in, dim, and lights up when you pause for 0.7 s (`Autocomplete.PauseMs`);
-"When I pause" shows it only then. The audio so far is transcribed as you speak, and the bundled llama.cpp
-`llama-server` (Metal, port 8179) continues the text as plain text, with your dictations into the same app over the
-last 2 minutes as context.
-
-**Grammar check** (off by default): after a dictation is pasted, the same model rewrites it as correct, natural text
+**Grammar check** (off by default): after a dictation is pasted, a local language model rewrites it as correct, natural text
 in the same language, and a panel proposes it with the changed words in green. The icon buttons insert it (replacing
 what was pasted: undo + paste; if you typed or switched apps meanwhile, it is pasted at the cursor instead), copy it,
 or close the panel; it also goes away after 15 s (`Polish.DisplaySeconds`) or with the next dictation.
 
-Both use the GGUF model chosen in the main window, downloaded from HuggingFace into the models folder by the
+It uses the GGUF model chosen in the main window, downloaded from HuggingFace into the models folder by the
 **Download** button, no Ollama needed. Gemma 3 4B (2.5 GB, about 3 GB of memory while loaded) is the default; it is
-unloaded with the speech model after `Memory.IdleUnloadMinutes`. Settings: the `LocalLlm`, `Autocomplete` and
-`Polish` sections of the config.
+unloaded with the speech model after `Memory.IdleUnloadMinutes`. Settings: the `LocalLlm` and `Polish` sections of
+the config.
 
 macOS specifics:
 

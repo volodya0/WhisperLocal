@@ -218,7 +218,7 @@ public sealed class LocalLlmConfig
 
 /// <summary>
 /// Autocomplete while dictating, like code completion: as you speak, one grey continuation finishes the sentence.
-/// Just say it, or ignore it and go on.
+/// Just say it, or ignore it and go on. Shelved while it is too raw: off whatever Mode says, and not in the UI.
 /// </summary>
 public sealed class AutocompleteConfig
 {
@@ -246,7 +246,10 @@ public sealed class AutocompleteConfig
     /// <summary>Timeout for one completion once the model is loaded; late ones are dropped.</summary>
     public int TimeoutMs { get; set; } = 3000;
 
-    public bool IsOn => !string.Equals(Mode, "Off", StringComparison.OrdinalIgnoreCase);
+    /// <summary>False until autocomplete is ready to come back; then Mode decides again.</summary>
+    public static bool Available => false;
+
+    public bool IsOn => Available && !string.Equals(Mode, "Off", StringComparison.OrdinalIgnoreCase);
     public bool OnPauseOnly => string.Equals(Mode, "Pause", StringComparison.OrdinalIgnoreCase);
 }
 

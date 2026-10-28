@@ -130,7 +130,7 @@
       "Xcode": "The text goes into a code editor: keep code identifiers, file names and shell commands verbatim."
     }
   },
-  // Local language model for autocomplete and the grammar check: the bundled llama-server (Metal) and a GGUF model,
+  // Local language model for the grammar check: the bundled llama-server (Metal) and a GGUF model,
   // chosen and downloaded in the main window
   "LocalLlm": {
     // Relative to the app (built by scripts/build-mac.sh)
@@ -141,20 +141,6 @@
     "Port": 8179,
     "ExtraArgs": "-c 4096 -ngl 99 --no-webui --reasoning off",
     "StartupTimeoutSec": 60
-  },
-  // Autocomplete while you speak, like code completion: one grey continuation that finishes the sentence
-  "Autocomplete": {
-    // "Off", "Always" (refreshed while you speak, highlighted on a pause) or "Pause" (only on a pause)
-    "Mode": "Off",
-    "MaxWords": 12,
-    "RefreshMs": 1000,
-    // Silence after speech that counts as a pause
-    "PauseMs": 700,
-    // Earlier dictations into the same app within this many minutes come first as context
-    "ContextMinutes": 2,
-    "ContextChars": 600,
-    "Temperature": 0.1,
-    "TimeoutMs": 3000
   },
   // Grammar check after a dictation: a panel proposes a polished version (changes highlighted) to insert or copy
   "Polish": {

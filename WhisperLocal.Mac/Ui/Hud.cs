@@ -16,6 +16,8 @@ internal static class Hud
     private const long NSStatusWindowLevel = 25;
     private const long CanJoinAllSpaces = 1 << 0, Stationary = 1 << 4, IgnoresCycle = 1 << 6, FullScreenAuxiliary = 1 << 8;
     private const long Behavior = CanJoinAllSpaces | Stationary | IgnoresCycle | FullScreenAuxiliary;
+    private const long NSWindowAnimationBehaviorNone = 2;
+    private const ulong NSWindowOcclusionStateVisible = 1 << 1;
 
     /// <summary>A dark rounded panel; returns it and the background colour to release with it.</summary>
     public static (IntPtr Panel, IntPtr Background) CreatePanel(double width, double height, double alpha)
@@ -31,6 +33,7 @@ internal static class Hud
         Send(panel, Sel("setHasShadow:"), true);
         Send(panel, Sel("setBackgroundColor:"), Send(Class("NSColor"), Sel("clearColor")));
         Send(panel, Sel("setCollectionBehavior:"), Behavior);
+        Send(panel, Sel("setAnimationBehavior:"), NSWindowAnimationBehaviorNone);
         // Dark controls on the dark background, whatever the system appearance
         Send(panel, Sel("setAppearance:"), Send(Class("NSAppearance"), Sel("appearanceNamed:"), Str("NSAppearanceNameDarkAqua")));
 
@@ -67,8 +70,11 @@ internal static class Hud
 
         var visible = SendBool(panel, Sel("isVisible"));
         var onActiveSpace = SendBool(panel, Sel("isOnActiveSpace"));
+        // Occlusion is updated asynchronously, so it only adds detail to a report
+        var occlusion = (ulong)SendLong(panel, Sel("occlusionState"));
         if (!visible || !onActiveSpace)
             Log.Warn($"{name} is not on screen after ordering it front: visible={visible}, onActiveSpace={onActiveSpace}, " +
+                     $"occluded={(occlusion & NSWindowOcclusionStateVisible) == 0}, window={SendLong(panel, Sel("windowNumber"))}, " +
                      $"frame=({frame.X:F0}, {frame.Y:F0}, {frame.Width:F0}×{frame.Height:F0}), activation policy={ActivationPolicy()}");
     }
 

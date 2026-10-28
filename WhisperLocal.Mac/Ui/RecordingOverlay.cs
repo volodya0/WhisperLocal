@@ -9,6 +9,8 @@ namespace WhisperLocal.Mac.Ui;
 /// Small indicator at the bottom of the screen; a non-activating panel that never takes focus.
 /// Recording and processing show a live seconds counter; afterwards a short summary (with a button that opens
 /// the transcript) stays for a moment, longer while the mouse is over it. Click-through except in that state.
+/// Each dictation gets a freshly created panel: after the app had run for hours, macOS sometimes stopped showing the
+/// long-lived one anywhere (not even on the normal desktop) until the app was restarted.
 /// </summary>
 internal sealed class RecordingOverlay : IDisposable
 {
@@ -26,11 +28,12 @@ internal sealed class RecordingOverlay : IDisposable
     private enum Mode { Hidden, Recording, Processing, Result }
 
     private readonly SynchronizationContext _ui;
-    private readonly IntPtr _panel;
-    private readonly IntPtr _label;
-    private readonly IntPtr _button;
-    private readonly IntPtr _background;
+    private readonly long _showTextTag;
     private readonly System.Threading.Timer _timer;
+    private IntPtr _panel;
+    private IntPtr _label;
+    private IntPtr _button;
+    private IntPtr _background;
 
     private Mode _mode = Mode.Hidden;
     private long _since;
@@ -39,6 +42,13 @@ internal sealed class RecordingOverlay : IDisposable
     public RecordingOverlay(SynchronizationContext ui, Action showText)
     {
         _ui = ui;
+        _showTextTag = ActionTarget.Register(showText);
+        _timer = new System.Threading.Timer(_ => _ui.Post(_ => Tick(), null), null, Timeout.Infinite, Timeout.Infinite);
+        CreatePanel();
+    }
+
+    private void CreatePanel()
+    {
         (_panel, _background) = Hud.CreatePanel(TimerWidth, Height, 0.9);
         var content = Send(_panel, Sel("contentView"));
 
@@ -49,14 +59,31 @@ internal sealed class RecordingOverlay : IDisposable
 
         _button = Retain(Send(Class("NSButton"), Sel("buttonWithTitle:target:action:"),
             Str("Text"), ActionTarget.Instance, ActionTarget.ActionSelector));
-        Send(_button, Sel("setTag:"), ActionTarget.Register(showText));
+        Send(_button, Sel("setTag:"), _showTextTag);
         Send(_button, Sel("setControlSize:"), 1L); // NSControlSizeSmall
         Send(content, Sel("addSubview:"), _button);
-
-        _timer = new System.Threading.Timer(_ => _ui.Post(_ => Tick(), null), null, Timeout.Infinite, Timeout.Infinite);
     }
 
-    public void ShowRecording(long startTimestamp) => ShowCounter(Mode.Recording, startTimestamp);
+    private void ReleasePanel()
+    {
+        Send(_panel, Sel("orderOut:"), IntPtr.Zero);
+        Release(_button);
+        Release(_label);
+        // Autoreleased: a Text button click or a timer tick may still be using it in this event
+        Send(_panel, Sel("autorelease"));
+        MacNative.CGColorRelease(_background);
+    }
+
+    public void ShowRecording(long startTimestamp)
+    {
+        // A new panel for every dictation; one still showing the last summary is simply reused
+        if (_mode == Mode.Hidden)
+        {
+            ReleasePanel();
+            CreatePanel();
+        }
+        ShowCounter(Mode.Recording, startTimestamp);
+    }
 
     public void ShowProcessing(long startTimestamp) => ShowCounter(Mode.Processing, startTimestamp);
 
@@ -136,10 +163,6 @@ internal sealed class RecordingOverlay : IDisposable
     public void Dispose()
     {
         _timer.Dispose();
-        Send(_panel, Sel("orderOut:"), IntPtr.Zero);
-        Release(_button);
-        Release(_label);
-        Release(_panel);
-        MacNative.CGColorRelease(_background);
+        ReleasePanel();
     }
 }

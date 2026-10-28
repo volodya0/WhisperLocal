@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- macOS: the recording indicator could stop showing anywhere (not only over full-screen apps) after the app had run
+  for a long time, until it was restarted. Every dictation now gets a freshly created indicator panel, and the log
+  says more when macOS keeps it hidden.
+- Main window: changing a setting no longer shows a "Saved…" line with a description under it; errors and the hotkey
+  recording prompt still show there.
+- Autocomplete is shelved while it is too raw: it is gone from the main window, the default config and the docs, and
+  stays off even if an older config still has `Autocomplete.Mode` set (the code is kept for when it comes back).
 - Main window shows only the last 3 dictations; the full history (grouped by day, with averages) and the statistics
   open in their own windows from the All history and Statistics buttons.
 - macOS: when no text input is focused (a file list, the desktop), the dictation is not pasted into nothing: the
