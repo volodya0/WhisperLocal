@@ -1,16 +1,18 @@
-# Builds WhisperLocal.app for macOS on GitHub's Mac runners and publishes a drag-to-Applications DMG:
-# as a workflow artifact on every run, and as a GitHub Release, which "Check for Updates" in the app looks at:
+# Builds WhisperLocal for macOS (a drag-to-Applications DMG, on GitHub's Mac runners) and Windows (a zip of the app
+# folder), on every push to any branch and every pull request: as workflow artifacts on every run, and as one GitHub
+# Release with both downloads, which "Check for Updates" in the apps looks at:
 # - every push to the main branch is released automatically as v1.0.<run number>;
 # - a pushed tag like v1.2.0 is released with that version.
+# (The file keeps its old name: the run number, and so the version, continues from it.)
 #
 # Signing: with the repository secrets MACOS_CERT_P12 (base64 of a .p12 with a code signing certificate,
 # a self-signed one is enough) and MACOS_CERT_PASSWORD, every build is signed with that certificate, so macOS
 # keeps the Accessibility permission across updates. Without them the build is signed ad hoc.
-name: macOS build
+name: Build
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -113,8 +115,65 @@ jobs:
           path: artifacts/*.dmg
           if-no-files-found: error
 
+  windows:
+    runs-on: windows-latest
+    env:
+      UPDATE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # The same version as the macOS build of this run (see its "Version" step)
+      - name: Version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF_NAME" == main ]]; then
+            echo "VERSION=1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $props = @("-p:UpdateRepository=$env:UPDATE_REPOSITORY")
+          if ($env:VERSION) { $props += "-p:Version=$env:VERSION" }
+          dotnet build WhisperLocal/WhisperLocal.csproj -c Release @props 2>&1 | Tee-Object -FilePath build.log
+          exit $LASTEXITCODE
+
+      - name: Self-test the app (shared windows start)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath WhisperLocal/bin/Release/net8.0-windows/WhisperLocal.exe -ArgumentList '--self-test' `
+            -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest.out -RedirectStandardError selftest.err
+          Get-Content selftest.out, selftest.err | Tee-Object -FilePath build.log -Append
+          exit $p.ExitCode
+
+      # The error lines as an annotation, readable from the checks API without access to the full logs
+      - name: Report build failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $lines = Get-Content build.log -ErrorAction SilentlyContinue | Select-String -Pattern 'error|failed' | Select-Object -Last 15
+          $text = ($lines | ForEach-Object { $_.Line.Substring(0, [Math]::Min(250, $_.Line.Length)) }) -join '%0A'
+          Write-Output "::error title=Windows build failed::$text"
+
+      # The model is not included: the app downloads it from the setup checklist
+      - name: Zip the app
+        shell: pwsh
+        run: Compress-Archive -Path WhisperLocal/bin/Release/net8.0-windows/* -DestinationPath WhisperLocal-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WhisperLocal-windows-x64
+          path: WhisperLocal-windows-x64.zip
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, windows]
     if: needs.build.outputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
@@ -122,8 +181,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: WhisperLocal-macOS-arm64
+          pattern: WhisperLocal-*
           path: artifacts
+          merge-multiple: true
 
       # Creates the tag on the built commit for branch pushes (tags made with GITHUB_TOKEN start no new runs);
       # the commit message becomes the release notes shown by "Check for Updates"
@@ -134,4 +194,6 @@ jobs:
           target_commitish: ${{ github.sha }}
           body: ${{ github.event.head_commit.message }}
           make_latest: true
-          files: artifacts/*.dmg
+          files: |
+            artifacts/*.dmg
+            artifacts/*.zip

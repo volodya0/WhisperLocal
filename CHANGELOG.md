@@ -10,9 +10,11 @@
 - Windows: the windows have the app icon instead of the default one; the setup line names the microphone that is
   actually used; the default language is Ukrainian + English (`"uk,en"`), as on macOS.
 - Windows works like macOS: the indicator counts seconds while recording and processing, then shows a summary
-  (times, words) with a Text button; the tray menu has the same items as the macOS menu (Check for Updates opens
-  the releases page for now); dictating on the desktop or the taskbar opens the transcript instead of pasting
-  (`Insert.ShowWhenNoTextField`).
+  (times, words) with a Text button; the tray menu has the same items as the macOS menu; dictating on the desktop or the
+  taskbar opens the transcript instead of pasting (`Insert.ShowWhenNoTextField`).
+- Windows updates: every release has a Windows zip next to the macOS DMG, and "Check for Updates…" on Windows
+  downloads it, checks its checksum and, once the app has quit, copies it over the app folder (keeping
+  `config.json`, models and history) and starts the new version. One CI workflow builds both apps, on every branch.
 - History: the last 1000 dictations are kept instead of 20; the history window shows 100 at a time with a
   "Show more" button. The file is appended to instead of rewritten on every dictation.
 - macOS: the recording indicator could stop showing anywhere (not only over full-screen apps) after the app had run

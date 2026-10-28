@@ -19,9 +19,15 @@ WhisperLocal живе в рядку меню (іконка з хвилею); і�
 
 ### Windows
 
-Готова до запуску версія буде згодом. Поки що WhisperLocal збирається з коду: див.
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#windows) (англійською). Потрібна відеокарта зі свіжим драйвером (AMD,
-NVIDIA або Intel).
+1. Скачайте `WhisperLocal-windows-x64.zip` з [Releases](https://github.com/volodya0/WhisperLocal/releases/latest).
+2. Розпакуйте його у власну папку, наприклад `Documents\WhisperLocal` (не в Program Files: програма зберігає там
+   налаштування, моделі й оновлення).
+3. Запустіть `WhisperLocal.exe`. Якщо Windows SmartScreen попереджає про невідому програму, натисніть
+   **Докладніше** → **Усе одно запустити**.
+
+Потрібна відеокарта зі свіжим драйвером (AMD, NVIDIA або Intel) і
+[.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). WhisperLocal живе в треї (іконка з хвилею
+біля годинника).
 
 ## Перший запуск
 
@@ -79,8 +85,8 @@ Applications). На Windows — подвійним клацанням по ік�
 
 - **Open WhisperLocal…** — головне вікно.
 - **Show Last Transcript** — текст останньої диктовки.
-- **Check for Updates…** — шукає нову версію і, якщо ви згодні, встановлює її й перезапускається (на Windows поки
-  відкриває сторінку релізів).
+- **Check for Updates…** — шукає нову версію і, якщо ви згодні, встановлює її й перезапускається. Налаштування,
+  моделі й історія лишаються.
 - **Enabled** — призупинити чи відновити диктовку.
 - **Unload from memory** — звільнити пам'ять, яку займають моделі; наступна диктовка завантажить їх знову.
 - **Quit WhisperLocal** — вийти.

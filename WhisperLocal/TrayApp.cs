@@ -9,6 +9,7 @@ using WhisperLocal.Pipeline;
 using WhisperLocal.Stt;
 using WhisperLocal.Text;
 using WhisperLocal.Ui;
+using WhisperLocal.Updates;
 
 namespace WhisperLocal;
 
@@ -19,8 +20,6 @@ namespace WhisperLocal;
 internal sealed class TrayApp : ApplicationContext, IAppHost
 {
     private enum State { Idle, Recording, Processing }
-
-    private const string ReleasesUrl = "https://github.com/volodya0/WhisperLocal/releases";
 
     // Failures and "no speech" need only a glance; a successful summary stays Ui.ResultSeconds
     private static readonly TimeSpan BriefDisplay = TimeSpan.FromSeconds(2);
@@ -51,6 +50,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     private ForegroundApp? _target;
     private string _lastTranscript = "";
     private Download? _download;
+    private bool _checkingForUpdates;
     private (string? Name, string? Configured, DateTime At) _microphone;
     private bool _disposed;
 
@@ -122,7 +122,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
 
         ApplyConfig();
         UpdateTrayState();
-        Log.Info($"WhisperLocal {Application.ProductVersion} started, config: {_config.FilePath}");
+        Log.Info($"WhisperLocal {Updater.CurrentVersionText} (Windows) started, config: {_config.FilePath}");
 
         if (_mainWindow.HasProblems)
             ShowMainWindow();
@@ -135,7 +135,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     public ConfigManager Config => _config;
     public DictationHistory History => _history;
     public DictationStats Stats => _stats;
-    public string VersionText => Application.ProductVersion.Split('+')[0];
+    public string VersionText => Updater.CurrentVersionText;
     public bool HasGrammarCheck => false;
 
     public IReadOnlyList<HotkeyPreset> HotkeyPresets { get; } =
@@ -223,8 +223,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         await WarmUpWhisperAsync();
     }
 
-    /// <summary>No updater on Windows yet: the releases page opens in the browser.</summary>
-    public void CheckForUpdates() => OpenPath(ReleasesUrl);
+    public void CheckForUpdates() => _ = CheckForUpdatesAsync();
 
     public void OpenPath(string path, bool textEditor = false)
     {
@@ -515,6 +514,58 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         {
             _download = null;
             _mainWindow.Refresh();
+        }
+    }
+
+    /// <summary>Manual update check (never automatic): asks before downloading and installing.</summary>
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_checkingForUpdates)
+            return;
+        if (Updater.Repository == null)
+        {
+            MessageBox.Show("This build does not know where updates are published (it was built without a GitHub repository).",
+                "Updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        _checkingForUpdates = true;
+        try
+        {
+            var release = await Updater.GetLatestAsync(CancellationToken.None);
+            if (release == null || !Updater.IsNewer(release))
+            {
+                MessageBox.Show($"WhisperLocal {Updater.CurrentVersionText} is the latest version.", "You're up to date",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var version = release.Version.ToString(3);
+            var notes = release.Notes.Length > 600 ? release.Notes[..600] + "…" : release.Notes;
+            if (MessageBox.Show($"You have {Updater.CurrentVersionText}.\n\n{notes}".TrimEnd() + "\n\nInstall it and restart WhisperLocal?",
+                    $"WhisperLocal {version} is available", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            if (_state != State.Idle)
+            {
+                MessageBox.Show("Finish the current dictation first, then check for updates again.", "Update",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            Log.Info($"Installing update {release.Tag}");
+            // Download and unpacking take a while: keep the UI thread free
+            await Task.Run(() => Updater.InstallAsync(release, message => _ui.Post(_ => Notify(message, ToolTipIcon.Info), null),
+                CancellationToken.None));
+            ExitApp();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Update failed", ex);
+            MessageBox.Show(ex.Message, "Update failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _checkingForUpdates = false;
         }
     }
 

@@ -19,6 +19,11 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
   </ItemGroup>
 
+  <!-- Where "Check for Updates" looks: owner/repo of the GitHub releases (CI passes -p:UpdateRepository) -->
+  <ItemGroup Condition="'$(UpdateRepository)' != ''">
+    <AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\WhisperLocal.Core\WhisperLocal.Core.csproj" />
     <ProjectReference Include="..\WhisperLocal.Ui\WhisperLocal.Ui.csproj" />

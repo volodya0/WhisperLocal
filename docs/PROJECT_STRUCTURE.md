@@ -48,8 +48,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `CHANGELOG.md` | What changed, newest on top. |
 | `.gitattributes` | Line endings: CRLF for C#/project files, LF for shell scripts and plists; binaries marked binary. |
 | `.gitignore` | Build output, models, artifacts, the locally built macOS servers, editor files. |
-| `.github/workflows/windows.yml` | CI: builds the Windows app on every push to `main` and every PR, runs its self-test, keeps a zip of the app folder. |
-| `.github/workflows/macos.yml` | CI: builds the macOS `.app`/DMG on every push and PR, runs the self-test, and on pushes to `main` (or `v*` tags) publishes a GitHub Release that "Check for Updates" picks up. |
+| `.github/workflows/macos.yml` | CI ("Build"): builds the macOS DMG and the Windows zip on every push and PR, runs both self-tests, and on pushes to `main` (or `v*` tags) publishes one GitHub Release with both, which "Check for Updates" picks up. |
 | `docs/PROJECT_STRUCTURE.md` | This file. |
 
 ### `WhisperLocal.Core` — shared logic
@@ -83,6 +82,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Stt/ModelNotFoundException.cs` | "Model missing" error whose message explains how to get it. |
 | `Text/TextFilters.cs` | Removes typical Whisper hallucinations and applies the regex dictionary from the config. |
 | `Text/TextDiff.cs` | Word-level diff, to highlight what the grammar check changed. |
+| `Updates/GitHubReleases.cs` | "Check for Updates", shared part: the latest GitHub release, version comparison, download with checksum check. |
 
 ### `WhisperLocal.Ui` — shared windows (Avalonia)
 
@@ -114,6 +114,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Output/TextInserter.cs` | Clipboard + Ctrl+V into the remembered window, restoring the clipboard (`Insert.RestoreClipboard`). |
 | `Ui/RecordingOverlay.cs` | Click-through "Recording / Processing" indicator at the bottom of the screen. |
 | `Ui/TrayIcons.cs` | Tray icons drawn at runtime (waveform on a coloured square per state); also the windows' icon. |
+| `Updates/Updater.cs` | "Check for Updates" on Windows: downloads the zip and, once the app has quit, copies it over the app folder (keeping `config.json`) and restarts. |
 | `Ui/SharedUi.cs` | Sets up Avalonia without its own run loop, so the shared windows run on the WinForms message loop. |
 | `Runtime/whisper/*` | Bundled whisper.cpp Vulkan build (`whisper-server.exe` and DLLs); `VERSION.md` says which version. |
 
@@ -142,7 +143,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Ui/AutocompletePanel.cs` | Ghost-text panel for autocomplete (shelved). |
 | `Ui/ActionTarget.cs` | One Objective-C object that receives menu and button clicks and dispatches them by tag. |
 | `Ui/Dialogs.cs` | Native alerts, notifications and opening files/URLs. |
-| `Updates/Updater.cs` | "Check for Updates": reads GitHub releases, downloads the DMG, verifies checksum and signer, replaces the app and restarts. |
+| `Updates/Updater.cs` | "Check for Updates" on macOS: downloads the DMG, verifies its signer, replaces the app and restarts. |
 | `Resources/*` | App icon (`AppIcon.icns`) and menu bar icons per state. |
 
 ### `scripts`

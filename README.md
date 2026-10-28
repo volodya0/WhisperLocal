@@ -19,8 +19,14 @@ WhisperLocal lives in the menu bar (the waveform icon); it has no Dock icon.
 
 ### Windows
 
-A ready-to-run download is coming. For now WhisperLocal is built from source: see
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#windows). It needs a GPU with a current driver (AMD, NVIDIA or Intel).
+1. Download `WhisperLocal-windows-x64.zip` from [Releases](https://github.com/volodya0/WhisperLocal/releases/latest).
+2. Unpack it into a folder of your own, for example `Documents\WhisperLocal` (not Program Files: the app keeps its
+   settings, models and updates there).
+3. Start `WhisperLocal.exe`. If Windows SmartScreen warns about an unknown app, click **More info** → **Run anyway**.
+
+It needs a GPU with a current driver (AMD, NVIDIA or Intel) and the
+[.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). WhisperLocal lives in the tray (the
+waveform icon by the clock).
 
 ## First launch
 
@@ -79,8 +85,8 @@ The menu bar icon on macOS, the tray icon on Windows:
 
 - **Open WhisperLocal…** — the main window.
 - **Show Last Transcript** — the text of the last dictation.
-- **Check for Updates…** — looks for a new version and, if you agree, installs it and restarts (on Windows it opens
-  the releases page for now).
+- **Check for Updates…** — looks for a new version and, if you agree, installs it and restarts. Your settings,
+  models and history stay.
 - **Enabled** — pause or resume dictation.
 - **Unload from memory** — free the memory the models use; the next dictation loads them again.
 - **Quit WhisperLocal**.
