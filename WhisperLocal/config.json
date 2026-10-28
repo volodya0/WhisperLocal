@@ -13,7 +13,8 @@
   },
   "Whisper": {
     "ServerExe": "whisper\\whisper-server.exe",
-    "ModelPath": "models\\ggml-large-v3.bin",
+    // Large v3 Turbo: several times faster than Large v3, almost as accurate; switch in the main window
+    "ModelPath": "models\\ggml-large-v3-turbo.bin",
     "Host": "127.0.0.1",
     "Port": 8178,
     "InferencePath": "/inference",

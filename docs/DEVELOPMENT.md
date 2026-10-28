@@ -22,11 +22,12 @@ Hotkey → microphone capture → 16 kHz mono PCM
    cd WhisperLocal
    dotnet build WhisperLocal.sln -c Release
    ```
-3. Download the model (~3 GB, SHA256-verified) into `models\` next to the exe:
+3. Download the model (Large v3 Turbo, 1.6 GB, the Windows default) into `models\` next to the exe, or press
+   **Download** in the app's setup checklist:
    ```
    powershell -ExecutionPolicy Bypass -File scripts\get-model.ps1 -Configuration Release
    ```
-   Without it the app shows a "model not found" dialog with the exact folder and download link.
+   Without it the app opens its main window, whose setup checklist has the Download button.
 4. Run `WhisperLocal\bin\Release\net8.0-windows\WhisperLocal.exe`.
 5. With several GPUs, see [choosing the GPU](CONFIGURATION.md#choosing-the-gpu-windows).
 
@@ -41,7 +42,7 @@ WhisperLocal\bin\<Configuration>\net8.0-windows\
   WhisperLocal.exe
   config.json                  the copy the app reads
   whisper\                     copied from Runtime\whisper
-  models\ggml-large-v3.bin     downloaded, not in git
+  models\ggml-large-v3-turbo.bin  downloaded, not in git
   logs\                        app log and whisper-server.log
 ```
 

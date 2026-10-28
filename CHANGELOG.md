@@ -18,6 +18,9 @@
 - Smaller Windows download: the app is built for Windows x64 only, so the UI libraries for other platforms
   (Linux, macOS, x86, ARM64) are no longer in the folder; no debug files, no whisper-bench; zipped with 7-Zip's
   strongest zip compression. CI prints the app folder's largest files.
+- Windows: Large v3 Turbo is the default speech model (1.6 GB, several times faster than Large v3, almost as
+  accurate); `scripts/get-model.ps1` downloads it by default. Existing installs keep their model: updates do not
+  replace `config.json`, and Large v3 stays one click away in the main window.
 - History: the last 1000 dictations are kept instead of 20; the history window shows 100 at a time with a
   "Show more" button. The file is appended to instead of rewritten on every dictation.
 - macOS: the recording indicator could stop showing anywhere (not only over full-screen apps) after the app had run

@@ -31,7 +31,7 @@ relative to the data folder.
 | `Hotkey.SuppressKey` | Swallow the hotkey so the app you type in does not see it. |
 | `Audio.DeviceName` | Part of the microphone name; empty = the system default. |
 | `Audio.MaxDurationSec` | A recording stops by itself after this long. |
-| `Whisper.ModelPath` | The speech model file (`models/ggml-large-v3.bin` or `models/ggml-large-v3-turbo.bin`). |
+| `Whisper.ModelPath` | The speech model file: `models/ggml-large-v3-turbo.bin` (Windows default) or `models/ggml-large-v3.bin` (macOS default, the most accurate). |
 | `Whisper.Language` | `"uk,en"` (detected per dictation, the default), `"uk,en,ru"`, `"uk"`, `"en"`, `"auto"`, or any list of language codes; the first one is the fallback. A single language makes speech in another language come out translated into it. |
 | `Whisper.ExtraArgs` | Extra `whisper-server` arguments. Windows default `-dev 0 -sns -t 8` (GPU index, suppress non-speech tokens, threads); add `-bs 5` for beam search (a bit more accurate, a bit slower). |
 | `Whisper.ServerExe` | The `whisper-server` to run. On macOS, `"whisper-server"` uses one from PATH (e.g. `brew install whisper-cpp`). |

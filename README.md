@@ -35,7 +35,8 @@ The main window opens with a short setup checklist. Fix each line with the butto
 - **Accessibility** (macOS) — needed for the hotkey and for pasting. Turn WhisperLocal on in System Settings →
   Privacy & Security → Accessibility; the hotkey works as soon as it is allowed.
 - **Microphone** — on macOS, allow it when asked.
-- **Model** — press **Download** (3.1 GB, or 1.6 GB for the Turbo model). This happens once.
+- **Model** — press **Download**. This happens once: 1.6 GB on Windows, where the faster Large v3 Turbo is the
+  default, 3.1 GB for Large v3 on macOS.
 
 When every line is green, the header says *Ready*.
 
@@ -63,7 +64,7 @@ On Windows, double-click the tray icon.
   Ukrainian only, English only, or any language. With a single language, speech in another language comes out
   translated into it.
 - **Speech model** — *Large v3* is the most accurate; *Large v3 Turbo* is several times faster and almost as
-  accurate, the better choice for computers with 8–16 GB of memory. **Unload** frees the memory right away; this also
+  accurate, the better choice for computers with 8–16 GB of memory (the default on Windows). **Unload** frees the memory right away; this also
   happens by itself after 5 minutes without dictation.
 - **Grammar check** — see below.
 - **Recent dictations** — the last three, with timings. **All history** and **Statistics** (words, speaking time,
