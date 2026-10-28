@@ -139,7 +139,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          $props = @("-p:UpdateRepository=$env:UPDATE_REPOSITORY")
+          $props = @("-p:UpdateRepository=$env:UPDATE_REPOSITORY", "-p:DebugType=none")
           if ($env:VERSION) { $props += "-p:Version=$env:VERSION" }
           dotnet build WhisperLocal/WhisperLocal.csproj -c Release @props 2>&1 | Tee-Object -FilePath build.log
           exit $LASTEXITCODE
@@ -161,10 +161,23 @@ jobs:
           $text = ($lines | ForEach-Object { $_.Line.Substring(0, [Math]::Min(250, $_.Line.Length)) }) -join '%0A'
           Write-Output "::error title=Windows build failed::$text"
 
-      # The model is not included: the app downloads it from the setup checklist
+      # The model is not included: the app downloads it from the setup checklist. 7-Zip's strongest zip (Deflate)
+      # compression; still a plain zip that Explorer and the updater unpack.
       - name: Zip the app
         shell: pwsh
-        run: Compress-Archive -Path WhisperLocal/bin/Release/net8.0-windows/* -DestinationPath WhisperLocal-windows-x64.zip
+        run: |
+          7z a -tzip -mx=9 -bd WhisperLocal-windows-x64.zip ./WhisperLocal/bin/Release/net8.0-windows/*
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # What the download consists of, to keep an eye on its size
+      - name: Size report
+        shell: pwsh
+        run: |
+          $dir = 'WhisperLocal/bin/Release/net8.0-windows'
+          $files = Get-ChildItem $dir -Recurse -File
+          "App folder: {0:N1} MB in {1} files; zip: {2:N1} MB" -f (($files | Measure-Object Length -Sum).Sum / 1MB), $files.Count, ((Get-Item WhisperLocal-windows-x64.zip).Length / 1MB)
+          $files | Sort-Object Length -Descending | Select-Object -First 15 |
+            ForEach-Object { "{0,8:N1} MB  {1}" -f ($_.Length / 1MB), $_.FullName.Substring((Resolve-Path $dir).Path.Length + 1) }
 
       - uses: actions/upload-artifact@v4
         with:
