@@ -9,6 +9,7 @@ namespace WhisperLocal.Input;
 /// Supports a single key ("RMenu") or a combination ("LMenu+LWin"): active while all keys are held,
 /// released when any of them goes up, cancelled when another key is pressed meanwhile.
 /// Must be created on a thread with a message loop; events are posted to the given context.
+/// Can also record a new combination for the settings window (<see cref="BeginRecording"/>).
 /// </summary>
 internal sealed class KeyboardHook : IDisposable
 {
@@ -46,6 +47,10 @@ internal sealed class KeyboardHook : IDisposable
         [Keys.Scroll] = "Scroll Lock",
     };
 
+    // Modifiers first, in this order, when a recorded combination is written to the config
+    private static readonly Keys[] ModifierOrder =
+        [Keys.LControlKey, Keys.RControlKey, Keys.LMenu, Keys.RMenu, Keys.LShiftKey, Keys.RShiftKey, Keys.LWin, Keys.RWin];
+
     // Unassigned virtual key, sent to "mask" a lone Win/Alt release (Start menu / menu bar)
     private const ushort VK_MASK = 0xE8;
 
@@ -54,6 +59,10 @@ internal sealed class KeyboardHook : IDisposable
     private IntPtr _hook;
     private int[] _keys = [];
     private bool _active;
+    private readonly HashSet<int> _recordHeld = [];
+    private readonly List<int> _recordAll = [];
+    private Action<int[]>? _recordPreview;
+    private Action<int[]?>? _recordDone;
 
     public bool SuppressKey { get; set; }
 
@@ -77,6 +86,38 @@ internal sealed class KeyboardHook : IDisposable
         _keys = virtualKeys;
         _active = false;
     }
+
+    /// <summary>
+    /// Records the next combination the user holds: <paramref name="preview"/> gets the keys held so far,
+    /// <paramref name="done"/> the combination once all keys are released, or null on Esc / <see cref="CancelRecording"/>.
+    /// The keys are swallowed meanwhile, so Win does not open the Start menu. Both callbacks are posted to the context.
+    /// </summary>
+    public void BeginRecording(Action<int[]> preview, Action<int[]?> done)
+    {
+        _recordHeld.Clear();
+        _recordAll.Clear();
+        _active = false;
+        _recordPreview = preview;
+        _recordDone = done;
+    }
+
+    public void CancelRecording() => EndRecording(null);
+
+    private void EndRecording(int[]? keys)
+    {
+        var done = _recordDone;
+        _recordDone = null;
+        _recordPreview = null;
+        if (done != null)
+            _context.Post(_ => done(keys), null);
+    }
+
+    /// <summary>Config form of recorded keys, modifiers first: "LControlKey+LWin".</summary>
+    public static string ToConfigString(IEnumerable<int> keys) =>
+        string.Join("+", keys
+            .Select((k, i) => (Key: k, Rank: Array.IndexOf(ModifierOrder, (Keys)k) is var m and >= 0 ? m : ModifierOrder.Length + i))
+            .OrderBy(e => e.Rank)
+            .Select(e => ((Keys)e.Key).ToString()));
 
     /// <summary>Parses "RMenu", "LMenu+LWin", "Ctrl+Win" etc. into virtual key codes.</summary>
     public static int[] ParseHotkey(string text)
@@ -116,7 +157,7 @@ internal sealed class KeyboardHook : IDisposable
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode < 0 || _keys.Length == 0)
+        if (nCode < 0 || (_keys.Length == 0 && _recordDone == null))
             return CallNextHookEx(_hook, nCode, wParam, lParam);
 
         var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
@@ -127,6 +168,12 @@ internal sealed class KeyboardHook : IDisposable
         var msg = (int)wParam;
         var isDown = msg is WM_KEYDOWN or WM_SYSKEYDOWN;
         var isUp = msg is WM_KEYUP or WM_SYSKEYUP;
+
+        if (_recordDone != null)
+        {
+            Record(vk, isDown, isUp);
+            return 1;
+        }
 
         if (Array.IndexOf(_keys, vk) >= 0)
         {
@@ -161,6 +208,27 @@ internal sealed class KeyboardHook : IDisposable
         }
 
         return CallNextHookEx(_hook, nCode, wParam, lParam);
+    }
+
+    private void Record(int vk, bool isDown, bool isUp)
+    {
+        if (isDown && (Keys)vk == Keys.Escape)
+        {
+            EndRecording(null);
+            return;
+        }
+        if (isDown && _recordHeld.Add(vk))
+        {
+            if (!_recordAll.Contains(vk))
+                _recordAll.Add(vk);
+            var preview = _recordPreview;
+            var keys = _recordAll.ToArray();
+            _context.Post(_ => preview?.Invoke(keys), null);
+        }
+        else if (isUp && _recordHeld.Remove(vk) && _recordHeld.Count == 0 && _recordAll.Count > 0)
+        {
+            EndRecording(_recordAll.ToArray());
+        }
     }
 
     /// <summary>

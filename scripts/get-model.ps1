@@ -4,13 +4,13 @@
     and verifies it.
 
 .EXAMPLE
-    .\scripts\get-model.ps1                                  # ggml-large-v3.bin into the Debug build
+    .\scripts\get-model.ps1                                  # ggml-large-v3-turbo.bin (the default) into the Debug build
     .\scripts\get-model.ps1 -Configuration Release           # into the Release build
-    .\scripts\get-model.ps1 ggml-large-v3-turbo.bin          # other models for comparison
+    .\scripts\get-model.ps1 ggml-large-v3.bin                # the most accurate model, or others for comparison
     .\scripts\get-model.ps1 -ModelsDir D:\Apps\WhisperLocal\models
 #>
 param(
-    [string]$Name = "ggml-large-v3.bin",
+    [string]$Name = "ggml-large-v3-turbo.bin",
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Debug",
     [string]$ModelsDir

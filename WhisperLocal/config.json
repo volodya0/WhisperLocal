@@ -13,12 +13,15 @@
   },
   "Whisper": {
     "ServerExe": "whisper\\whisper-server.exe",
-    "ModelPath": "models\\ggml-large-v3.bin",
+    // Large v3 Turbo: several times faster than Large v3, almost as accurate; switch in the main window
+    "ModelPath": "models\\ggml-large-v3-turbo.bin",
     "Host": "127.0.0.1",
     "Port": 8178,
     "InferencePath": "/inference",
     "ExtraArgs": "-dev 0 -sns -t 8",
-    "Language": "uk",
+    // "uk,en": detect Ukrainian or English per dictation; "uk" forces Ukrainian (English speech would come out
+    // translated into Ukrainian); "auto" detects any language
+    "Language": "uk,en",
     "Temperature": 0,
     // Hint for Whisper: terms listed here are more likely to be written exactly like this (keep it short)
     "InitialPrompt": "Розмова українською з англійськими термінами: Whisper, LLM, README, JSON, GitHub, Visual Studio, Podman, Apache, WireGuard, Nextcloud, mailcow, BLAST, WebGL, deploy, Docker.",
@@ -127,10 +130,14 @@
   "Insert": {
     "AppendTrailingSpace": true,
     "RestoreClipboard": true,
-    "RestoreDelayMs": 400
+    "RestoreDelayMs": 400,
+    // When nothing can take text (the desktop, the taskbar), open the transcript to edit and copy instead of pasting
+    "ShowWhenNoTextField": true
   },
   "Ui": {
-    "ShowOverlay": true
+    "ShowOverlay": true,
+    // Seconds the indicator keeps a successful dictation's summary (longer while the mouse is over it)
+    "ResultSeconds": 3
   },
   "Logging": {
     "LogText": true,

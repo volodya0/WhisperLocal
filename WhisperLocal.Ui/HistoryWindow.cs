@@ -7,13 +7,20 @@ using WhisperLocal.Pipeline;
 
 namespace WhisperLocal.Ui;
 
-/// <summary>All kept dictations, grouped by day, with average timings. Closing only hides it.</summary>
+/// <summary>
+/// All kept dictations, grouped by day, with average timings; the newest page first, "Show more" adds the next.
+/// Closing only hides it.
+/// </summary>
 public sealed class HistoryWindow : Window
 {
+    private const int PageSize = 100;
+
     private readonly IAppHost _host;
     private readonly TranscriptWindow _transcript;
     private readonly StackPanel _list = new();
     private readonly TextBlock _note = DarkTheme.MutedLabel("");
+    private readonly Button _more;
+    private int _shown = PageSize;
     private bool _allowClose;
 
     public HistoryWindow(IAppHost host, TranscriptWindow transcript)
@@ -21,6 +28,7 @@ public sealed class HistoryWindow : Window
         _host = host;
         _transcript = transcript;
         Title = "Dictation History";
+        Icon = App.WindowIcon;
         Width = 680;
         Height = 620;
         MinWidth = 480;
@@ -29,12 +37,19 @@ public sealed class HistoryWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         _note.Margin = new Thickness(0, 6, 0, 0);
+        _more = DarkTheme.Button("Show more", () =>
+        {
+            _shown += PageSize;
+            Refresh();
+        }, small: true);
+        _more.HorizontalAlignment = HorizontalAlignment.Left;
+        _more.Margin = new Thickness(0, 6, 0, 0);
         Content = new ScrollViewer
         {
             Content = new StackPanel
             {
                 Margin = new Thickness(10),
-                Children = { DarkTheme.Section("History", new StackPanel { Spacing = 4, Children = { _list, _note } }) },
+                Children = { DarkTheme.Section("History", new StackPanel { Spacing = 4, Children = { _list, _more, _note } }) },
             },
         };
 
@@ -56,6 +71,7 @@ public sealed class HistoryWindow : Window
     public void ShowAndActivate()
     {
         // Always: the Today/Yesterday headings move past midnight
+        _shown = PageSize;
         Refresh();
         Show();
         WindowState = WindowState.Normal;
@@ -66,7 +82,10 @@ public sealed class HistoryWindow : Window
     {
         _list.Children.Clear();
 
-        var records = _host.History.Recent(DictationHistory.Keep);
+        var total = _host.History.Count;
+        var records = _host.History.Recent(_shown);
+        _more.IsVisible = total > records.Count;
+        _more.Content = $"Show more ({total - records.Count} older)";
         if (records.Count == 0)
         {
             _note.Text = "Nothing yet. Hold the hotkey anywhere, speak, release.";
@@ -90,7 +109,7 @@ public sealed class HistoryWindow : Window
         }
 
         var note = $"The last {DictationHistory.Keep} dictations are kept.";
-        var spoken = records.Where(r => r.Words > 0).ToList();
+        var spoken = _host.History.Recent(total).Where(r => r.Words > 0).ToList();
         if (spoken.Count > 0)
         {
             var avgStt = spoken.Average(r => r.SttSec);

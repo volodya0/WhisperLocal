@@ -9,6 +9,7 @@ One solution (`WhisperLocal.sln`), four projects:
 ```mermaid
 graph TD
     Win["WhisperLocal<br/>Windows tray app<br/>(WinForms, net8.0-windows)"] --> Core
+    Win --> Ui
     Mac["WhisperLocal.Mac<br/>macOS menu bar app<br/>(AppKit via ObjC interop)"] --> Core
     Mac --> Ui["WhisperLocal.Ui<br/>shared windows<br/>(Avalonia)"]
     Ui --> Core["WhisperLocal.Core<br/>platform-neutral logic<br/>(config, pipeline, servers, models)"]
@@ -17,8 +18,8 @@ graph TD
 | Project | Role |
 |---|---|
 | `WhisperLocal.Core` | Everything that does not touch the OS UI: config, the dictation pipeline, the whisper/llama server processes, text filters, history and statistics, model downloads. |
-| `WhisperLocal.Ui` | Cross-platform Avalonia windows (main window, history, statistics, transcript). The platform app plugs in through `IAppHost`. Used by macOS; Windows does not use it yet. |
-| `WhisperLocal` | Windows app: tray icon, low-level keyboard hook, WASAPI recording, clipboard + Ctrl+V, WinForms indicator. |
+| `WhisperLocal.Ui` | Cross-platform Avalonia windows (main window, history, statistics, transcript). The platform app plugs in through `IAppHost`. Used by both apps. |
+| `WhisperLocal` | Windows app: tray icon, low-level keyboard hook, WASAPI recording, clipboard + Ctrl+V, WinForms indicator; hosts the shared windows on its WinForms message loop. |
 | `WhisperLocal.Mac` | macOS app: menu bar item, CGEventTap hotkey, AudioQueue recording, pasteboard + Cmd+V, native floating panels, updater. |
 
 Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal` types are visible to them.
@@ -47,7 +48,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `CHANGELOG.md` | What changed, newest on top. |
 | `.gitattributes` | Line endings: CRLF for C#/project files, LF for shell scripts and plists; binaries marked binary. |
 | `.gitignore` | Build output, models, artifacts, the locally built macOS servers, editor files. |
-| `.github/workflows/macos.yml` | CI: builds the macOS `.app`/DMG on every push and PR, runs the self-test, and on pushes to `main` (or `v*` tags) publishes a GitHub Release that "Check for Updates" picks up. |
+| `.github/workflows/macos.yml` | CI ("Build"): builds the macOS DMG and the Windows zip on every push and PR, runs both self-tests, and on pushes to `main` (or `v*` tags) publishes one GitHub Release with both, which "Check for Updates" picks up. |
 | `docs/PROJECT_STRUCTURE.md` | This file. |
 
 ### `WhisperLocal.Core` — shared logic
@@ -71,7 +72,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Native/ChildProcessJob.cs` | Makes sure `whisper-server`/`llama-server` never outlive the app (Windows job object; pid file + cleanup elsewhere). |
 | `Native/JobObjectMethods.cs` | P/Invoke declarations for the Windows job object API. |
 | `Pipeline/DictationPipeline.cs` | Audio → speech-to-text → filters → optional LLM cleanup; returns the text and timings. |
-| `Pipeline/DictationHistory.cs` | Last 20 dictations with timings, in `history.jsonl`. |
+| `Pipeline/DictationHistory.cs` | Last 1000 dictations with timings, in `history.jsonl`. |
 | `Pipeline/DictationStats.cs` | Lifetime statistics (today / 7 days / all time) in `stats.json`. |
 | `Pipeline/LiveAutocomplete.cs` | Autocomplete loop while the hotkey is held (shelved). |
 | `Stt/ISpeechToText.cs` | Speech-to-text interface: warm up, transcribe, unload. |
@@ -81,6 +82,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Stt/ModelNotFoundException.cs` | "Model missing" error whose message explains how to get it. |
 | `Text/TextFilters.cs` | Removes typical Whisper hallucinations and applies the regex dictionary from the config. |
 | `Text/TextDiff.cs` | Word-level diff, to highlight what the grammar check changed. |
+| `Updates/GitHubReleases.cs` | "Check for Updates", shared part: the latest GitHub release, version comparison, download with checksum check. |
 
 ### `WhisperLocal.Ui` — shared windows (Avalonia)
 
@@ -101,8 +103,8 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 |---|---|
 | `WhisperLocal.csproj` | WinForms exe (net8.0-windows); copies the bundled runtime and `config.json` next to the exe. |
 | `config.json` | Default Windows config (the copy next to the exe is the one read). |
-| `Program.cs` | Entry point: logging, `--batch`, single-instance mutex, config load, runs `TrayApp`. |
-| `TrayApp.cs` | The app: tray icon and menu, hotkey → record → pipeline → paste, idle unload, balloon errors. |
+| `Program.cs` | Entry point: logging, `--batch`, `--self-test` (used by CI), single-instance mutex, config load, shared windows setup, runs `TrayApp`. |
+| `TrayApp.cs` | The app: tray icon and menu, hotkey → record → pipeline → paste, history and statistics, model download, idle unload; implements `IAppHost` for the shared windows. |
 | `Autostart.cs` | Start with Windows via the per-user Run registry key. |
 | `Audio/AudioRecorder.cs` | WASAPI microphone capture, converted to 16 kHz mono on stop. |
 | `Audio/AudioFile.cs` | Decodes audio files with Media Foundation (for `--batch`). |
@@ -111,7 +113,9 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Native/NativeMethods.cs` | Win32 P/Invoke declarations (hooks, input, windows, icons). |
 | `Output/TextInserter.cs` | Clipboard + Ctrl+V into the remembered window, restoring the clipboard (`Insert.RestoreClipboard`). |
 | `Ui/RecordingOverlay.cs` | Click-through "Recording / Processing" indicator at the bottom of the screen. |
-| `Ui/TrayIcons.cs` | Tray icons drawn at runtime (waveform on a coloured square per state). |
+| `Ui/TrayIcons.cs` | Tray icons drawn at runtime (waveform on a coloured square per state); also the windows' icon. |
+| `Updates/Updater.cs` | "Check for Updates" on Windows: downloads the zip and, once the app has quit, copies it over the app folder (keeping `config.json`) and restarts. |
+| `Ui/SharedUi.cs` | Sets up Avalonia without its own run loop, so the shared windows run on the WinForms message loop. |
 | `Runtime/whisper/*` | Bundled whisper.cpp Vulkan build (`whisper-server.exe` and DLLs); `VERSION.md` says which version. |
 
 ### `WhisperLocal.Mac` — macOS app
@@ -139,7 +143,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Ui/AutocompletePanel.cs` | Ghost-text panel for autocomplete (shelved). |
 | `Ui/ActionTarget.cs` | One Objective-C object that receives menu and button clicks and dispatches them by tag. |
 | `Ui/Dialogs.cs` | Native alerts, notifications and opening files/URLs. |
-| `Updates/Updater.cs` | "Check for Updates": reads GitHub releases, downloads the DMG, verifies checksum and signer, replaces the app and restarts. |
+| `Updates/Updater.cs` | "Check for Updates" on macOS: downloads the DMG, verifies its signer, replaces the app and restarts. |
 | `Resources/*` | App icon (`AppIcon.icns`) and menu bar icons per state. |
 
 ### `scripts`
@@ -157,5 +161,5 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | Config | `config.json` next to the exe | `~/Library/Application Support/WhisperLocal/config.json` |
 | Logs | `logs\` next to the exe | `.../WhisperLocal/logs/` |
 | Models | `models\` next to the exe | `.../WhisperLocal/models/` |
-| History, statistics | — | `.../WhisperLocal/history.jsonl`, `stats.json` |
+| History, statistics | `history.jsonl`, `stats.json` next to the exe | `.../WhisperLocal/history.jsonl`, `stats.json` |
 | whisper-server | `whisper\` next to the exe | inside `WhisperLocal.app` |

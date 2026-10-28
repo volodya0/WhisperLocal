@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Windows: the shared main window (setup checklist with model download, hotkey selector with Record…, language,
+  speech model and memory, recent dictations), history, statistics and transcript windows; "Open WhisperLocal…" and
+  "Show Last Transcript" in the tray menu (double-click the icon for the main window). Dictations are kept in the
+  history and statistics like on macOS. A missing model opens the main window instead of a dialog.
+- Windows CI build (GitHub Actions): builds the app, runs a self-test and keeps a zip of the app folder.
+- Windows: the windows have the app icon instead of the default one; the setup line names the microphone that is
+  actually used; the default language is Ukrainian + English (`"uk,en"`), as on macOS.
+- Windows works like macOS: the indicator counts seconds while recording and processing, then shows a summary
+  (times, words) with a Text button; the tray menu has the same items as the macOS menu; dictating on the desktop or the
+  taskbar opens the transcript instead of pasting (`Insert.ShowWhenNoTextField`).
+- Windows updates: every release has a Windows zip next to the macOS DMG, and "Check for Updates…" on Windows
+  downloads it, checks its checksum and, once the app has quit, copies it over the app folder (keeping
+  `config.json`, models and history) and starts the new version. One CI workflow builds both apps, on every branch.
+- Smaller Windows download: the app is built for Windows x64 only, so the UI libraries for other platforms
+  (Linux, macOS, x86, ARM64) are no longer in the folder; no debug files, no whisper-bench; zipped with 7-Zip's
+  strongest zip compression. CI prints the app folder's largest files.
+- Windows: Large v3 Turbo is the default speech model (1.6 GB, several times faster than Large v3, almost as
+  accurate); `scripts/get-model.ps1` downloads it by default. Existing installs keep their model: updates do not
+  replace `config.json`, and Large v3 stays one click away in the main window.
+- History: the last 1000 dictations are kept instead of 20; the history window shows 100 at a time with a
+  "Show more" button. The file is appended to instead of rewritten on every dictation.
 - macOS: the recording indicator could stop showing anywhere (not only over full-screen apps) after the app had run
   for a long time, until it was restarted. Every dictation now gets a freshly created indicator panel, and the log
   says more when macOS keeps it hidden.

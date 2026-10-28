@@ -9,7 +9,7 @@ If the file is missing, the app writes one with the defaults.
 | | File | How to open it |
 |---|---|---|
 | macOS | `~/Library/Application Support/WhisperLocal/config.json` | Main window → **Config** |
-| Windows | `config.json` next to `WhisperLocal.exe` | Tray icon → **Open config** |
+| Windows | `config.json` next to `WhisperLocal.exe` | Main window → **Config** |
 
 macOS: the app's own `WhisperLocal.Mac/config.json` is copied there on the first run only; afterwards the copy in
 Application Support is the one to edit. Delete it to get the defaults back.
@@ -31,14 +31,14 @@ relative to the data folder.
 | `Hotkey.SuppressKey` | Swallow the hotkey so the app you type in does not see it. |
 | `Audio.DeviceName` | Part of the microphone name; empty = the system default. |
 | `Audio.MaxDurationSec` | A recording stops by itself after this long. |
-| `Whisper.ModelPath` | The speech model file (`models/ggml-large-v3.bin` or `models/ggml-large-v3-turbo.bin`). |
-| `Whisper.Language` | `"uk,en"` (detected per dictation, macOS default), `"uk,en,ru"`, `"uk"` (Windows default), `"en"`, `"auto"`, or any list of language codes; the first one is the fallback. A single language makes speech in another language come out translated into it. |
+| `Whisper.ModelPath` | The speech model file: `models/ggml-large-v3-turbo.bin` (Windows default) or `models/ggml-large-v3.bin` (macOS default, the most accurate). |
+| `Whisper.Language` | `"uk,en"` (detected per dictation, the default), `"uk,en,ru"`, `"uk"`, `"en"`, `"auto"`, or any list of language codes; the first one is the fallback. A single language makes speech in another language come out translated into it. |
 | `Whisper.ExtraArgs` | Extra `whisper-server` arguments. Windows default `-dev 0 -sns -t 8` (GPU index, suppress non-speech tokens, threads); add `-bs 5` for beam search (a bit more accurate, a bit slower). |
 | `Whisper.ServerExe` | The `whisper-server` to run. On macOS, `"whisper-server"` uses one from PATH (e.g. `brew install whisper-cpp`). |
 | `Memory.IdleUnloadMinutes` | Unload the models after this many minutes without dictation (default 5; 0 = never). |
 | `Insert.AppendTrailingSpace` | Add a space after the pasted text. |
 | `Insert.RestoreClipboard` | Put the previous clipboard content back after pasting. |
-| `Insert.ShowWhenNoTextField` | macOS: when no text field is focused, open the transcript instead of pasting. |
+| `Insert.ShowWhenNoTextField` | When nothing can take text (macOS: no text field focused; Windows: the desktop or the taskbar), open the transcript instead of pasting. |
 | `Ui.ShowOverlay` | Show the indicator at the bottom of the screen. |
 | `Ui.ResultSeconds` | How long the indicator shows a dictation's summary. |
 | `Logging.LogText` | Keep the text of each dictation in the log and the history (on by default). |

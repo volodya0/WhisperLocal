@@ -30,6 +30,21 @@ internal sealed class AudioRecorder : IDisposable
             .ToList();
     }
 
+    /// <summary>Name of the microphone <see cref="Start"/> would use for <paramref name="deviceName"/>, or null if there is none.</summary>
+    public static string? ResolveDeviceName(string? deviceName)
+    {
+        try
+        {
+            using var device = FindDevice(deviceName);
+            return device.FriendlyName;
+        }
+        catch (Exception ex)
+        {
+            Log.Debug($"No microphone: {ex.Message}");
+            return null;
+        }
+    }
+
     public void Start(string? deviceName, int maxSeconds)
     {
         if (_capture != null)

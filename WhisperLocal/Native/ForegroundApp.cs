@@ -23,6 +23,17 @@ internal sealed record ForegroundApp(IntPtr Hwnd, uint ProcessId, string Process
         return new ForegroundApp(hwnd, pid, name);
     }
 
+    /// <summary>
+    /// False when the foreground window is the desktop or the taskbar, where there is nothing to type into;
+    /// null otherwise (unknown: the text is pasted). The counterpart of FocusedInput.AcceptsText on macOS.
+    /// </summary>
+    public bool? AcceptsText()
+    {
+        var className = new System.Text.StringBuilder(64);
+        GetClassName(Hwnd, className, className.Capacity);
+        return className.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" ? false : null;
+    }
+
     /// <summary>True/false if the token could be read; null if access was denied (usually an elevated or protected process).</summary>
     public bool? IsElevated()
     {

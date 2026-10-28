@@ -1,29 +1,20 @@
 using System.Diagnostics;
-using System.Net.Http.Headers;
-using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text.Json;
 using WhisperLocal.Config;
+using WhisperLocal.Updates;
 
 namespace WhisperLocal.Mac.Updates;
 
 /// <summary>
-/// Manual updates from the GitHub releases of the repository the app was built from: check, and on request
-/// download the DMG, verify it, replace the .app and restart. Nothing runs unless the user asks.
+/// Manual updates from the GitHub releases of the repository the app was built from (<see cref="GitHubReleases"/>):
+/// check, and on request download the DMG, verify it, replace the .app and restart. Nothing runs unless the user asks.
 /// </summary>
 internal static class Updater
 {
-    public sealed record Release(Version Version, string Tag, string DmgUrl, string? Sha256, string Notes);
-
     /// <summary>"owner/repo", baked in at build time (scripts/build-mac.sh, from CI or the git remote).</summary>
-    public static string? Repository { get; } = Assembly.GetEntryAssembly()?
-        .GetCustomAttributes<AssemblyMetadataAttribute>()
-        .FirstOrDefault(a => a.Key == "UpdateRepository")?.Value is { Length: > 0 } repo ? repo : null;
+    public static string? Repository => GitHubReleases.Repository;
 
-    public static Version CurrentVersion { get; } = Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0, 0);
-
-    public static string CurrentVersionText => CurrentVersion.ToString(3);
+    public static string CurrentVersionText => GitHubReleases.CurrentVersionText;
 
     /// <summary>The running .app bundle; null when started with dotnet run or outside a bundle.</summary>
     public static string? BundlePath
@@ -40,38 +31,9 @@ internal static class Updater
     private static string Arch => RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
 
     /// <summary>The newest release with a DMG for this Mac's architecture, or null if none is published.</summary>
-    public static async Task<Release?> GetLatestAsync(CancellationToken ct)
-    {
-        if (Repository == null)
-            throw new InvalidOperationException("This build does not know where to look for updates.");
+    public static Task<Release?> GetLatestAsync(CancellationToken ct) => GitHubReleases.GetLatestAsync($"-{Arch}.dmg", ct);
 
-        using var http = CreateClient();
-        using var response = await http.GetAsync($"https://api.github.com/repos/{Repository}/releases/latest", ct);
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            return null; // no releases yet
-        response.EnsureSuccessStatusCode();
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-        var root = doc.RootElement;
-        var tag = root.GetProperty("tag_name").GetString() ?? "";
-        if (!Version.TryParse(tag.TrimStart('v', 'V'), out var version))
-            return null;
-
-        foreach (var asset in root.GetProperty("assets").EnumerateArray())
-        {
-            var name = asset.GetProperty("name").GetString() ?? "";
-            if (!name.EndsWith($"-{Arch}.dmg", StringComparison.OrdinalIgnoreCase))
-                continue;
-            // GitHub publishes "sha256:<hex>" digests for release assets
-            var digest = asset.TryGetProperty("digest", out var d) ? d.GetString() : null;
-            var sha256 = digest != null && digest.StartsWith("sha256:") ? digest["sha256:".Length..] : null;
-            var notes = root.TryGetProperty("body", out var body) ? body.GetString() ?? "" : "";
-            return new Release(Normalize(version), tag, asset.GetProperty("browser_download_url").GetString()!, sha256, notes);
-        }
-        return null;
-    }
-
-    public static bool IsNewer(Release release) => release.Version > Normalize(CurrentVersion);
+    public static bool IsNewer(Release release) => GitHubReleases.IsNewer(release);
 
     /// <summary>
     /// Downloads and installs <paramref name="release"/> over the running bundle, then starts a helper that
@@ -93,19 +55,7 @@ internal static class Updater
         {
             status($"Downloading WhisperLocal {release.Version.ToString(3)}…");
             var dmg = Path.Combine(work, "update.dmg");
-            using (var http = CreateClient())
-            await using (var source = await http.GetStreamAsync(release.DmgUrl, ct))
-            await using (var file = File.Create(dmg))
-                await source.CopyToAsync(file, ct);
-
-            if (release.Sha256 != null)
-            {
-                status("Verifying the download…");
-                await using var stream = File.OpenRead(dmg);
-                var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)).ToLowerInvariant();
-                if (actual != release.Sha256.ToLowerInvariant())
-                    throw new InvalidDataException("The downloaded update is damaged (checksum mismatch). Try again later.");
-            }
+            await GitHubReleases.DownloadAsync(release, dmg, ct);
 
             status("Installing…");
             Run("/usr/bin/hdiutil", "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", mount, dmg);
@@ -170,16 +120,6 @@ internal static class Updater
         if (exit != 0)
             throw new InvalidDataException($"The update is not signed by the same certificate as this app. {verifyError.Trim()}");
     }
-
-    private static HttpClient CreateClient()
-    {
-        var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("WhisperLocal", CurrentVersionText));
-        http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-        return http;
-    }
-
-    private static Version Normalize(Version v) => new(v.Major, v.Minor, Math.Max(v.Build, 0));
 
     private static void Run(string file, params string[] args)
     {

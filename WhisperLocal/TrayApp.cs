@@ -7,35 +7,59 @@ using WhisperLocal.Native;
 using WhisperLocal.Output;
 using WhisperLocal.Pipeline;
 using WhisperLocal.Stt;
+using WhisperLocal.Text;
 using WhisperLocal.Ui;
+using WhisperLocal.Updates;
 
 namespace WhisperLocal;
 
-/// <summary>Tray-only application: hotkey → record → pipeline → paste.</summary>
-internal sealed class TrayApp : ApplicationContext
+/// <summary>
+/// Tray application: hotkey → record → pipeline → paste, plus the host of the shared (Avalonia) windows.
+/// Everything here runs on the UI thread.
+/// </summary>
+internal sealed class TrayApp : ApplicationContext, IAppHost
 {
     private enum State { Idle, Recording, Processing }
 
+    // Failures and "no speech" need only a glance; a successful summary stays Ui.ResultSeconds
+    private static readonly TimeSpan BriefDisplay = TimeSpan.FromSeconds(2);
+
     private readonly ConfigManager _config;
     private readonly SynchronizationContext _ui;
+    private readonly DictationHistory _history;
+    private readonly DictationStats _stats;
     private readonly NotifyIcon _tray;
     private readonly ToolStripMenuItem _enabledItem;
     private readonly ToolStripMenuItem _unloadItem;
+    private readonly ToolStripMenuItem _transcriptItem;
     private readonly KeyboardHook _hook;
     private readonly AudioRecorder _recorder = new();
     private readonly WhisperServerStt _stt;
     private readonly OllamaCleaner _llm;
     private readonly DictationPipeline _pipeline;
     private readonly TextInserter _inserter = new();
-    private readonly RecordingOverlay _overlay = new();
+    private readonly RecordingOverlay _overlay;
+    private readonly TranscriptWindow _transcriptWindow = new();
+    private readonly MainWindow _mainWindow;
     private readonly System.Windows.Forms.Timer _idleTimer = new() { Interval = 30_000 };
 
     private State _state = State.Idle;
     private bool _enabled = true;
     private long _pressedAt;
     private DateTime _lastActivityUtc = DateTime.UtcNow;
-    private bool _modelDialogOpen;
     private ForegroundApp? _target;
+    private string _lastTranscript = "";
+    private Download? _download;
+    private bool _checkingForUpdates;
+    private (string? Name, string? Configured, DateTime At) _microphone;
+    private bool _disposed;
+
+    /// <summary>A model download in progress: what the setup line shows, and how to cancel it.</summary>
+    private sealed class Download
+    {
+        public CancellationTokenSource Cancel { get; } = new();
+        public string Text { get; set; } = "";
+    }
 
     public TrayApp(ConfigManager config)
     {
@@ -44,28 +68,47 @@ internal sealed class TrayApp : ApplicationContext
         _ui = SynchronizationContext.Current!;
 
         _config = config;
+        _history = new DictationHistory(Path.Combine(AppPaths.DataDir, "history.jsonl"));
+        // Seeded from the history once, so dictations from before the statistics existed count too
+        _stats = new DictationStats(Path.Combine(AppPaths.DataDir, "stats.json"), _history.Recent(int.MaxValue));
         _stt = new WhisperServerStt(config);
         _llm = new OllamaCleaner(config);
         _pipeline = new DictationPipeline(config, _stt, _llm);
+        _mainWindow = new MainWindow(this, _transcriptWindow);
+        _overlay = new RecordingOverlay(ShowLastTranscript);
 
+        // The same menu as the macOS menu bar item
+        var openItem = new ToolStripMenuItem("Open WhisperLocal…", null, (_, _) => ShowMainWindow());
+        openItem.Font = new Font(openItem.Font, FontStyle.Bold); // the double-click action
+        _transcriptItem = new ToolStripMenuItem("Show Last Transcript", null, (_, _) => ShowLastTranscript());
         _enabledItem = new ToolStripMenuItem("Enabled", null, (_, _) => ToggleEnabled()) { Checked = true };
         _unloadItem = new ToolStripMenuItem("Unload from memory", null, async (_, _) => await UnloadFromMemoryAsync());
         var menu = new ContextMenuStrip();
         menu.Items.AddRange(
         [
+            openItem,
+            _transcriptItem,
+            new ToolStripMenuItem("Check for Updates…", null, (_, _) => CheckForUpdates()),
+            new ToolStripSeparator(),
             _enabledItem,
             _unloadItem,
             new ToolStripSeparator(),
-            new ToolStripMenuItem("Open config", null, (_, _) => OpenFile(_config.FilePath)),
-            new ToolStripMenuItem("Open log", null, (_, _) => OpenFile(Log.CurrentFile)),
-            new ToolStripSeparator(),
-            new ToolStripMenuItem("Exit", null, (_, _) => ExitApp()),
+            new ToolStripMenuItem("Quit WhisperLocal", null, (_, _) => ExitApp()),
         ]);
 
-        // "Unload from memory" is available only while something is loaded
-        menu.Opening += (_, _) => _unloadItem.Enabled = IsAnythingLoaded;
+        menu.Opening += (_, _) =>
+        {
+            // "Unload from memory" is available only while something is loaded
+            _unloadItem.Enabled = IsAnythingLoaded;
+            _transcriptItem.Enabled = _lastTranscript.Length > 0;
+        };
 
         _tray = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
+        _tray.MouseDoubleClick += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+                ShowMainWindow();
+        };
 
         _hook = new KeyboardHook(_ui);
         _hook.HotkeyDown += OnHotkeyDown;
@@ -79,10 +122,140 @@ internal sealed class TrayApp : ApplicationContext
 
         ApplyConfig();
         UpdateTrayState();
-        Log.Info($"WhisperLocal {Application.ProductVersion} started, config: {_config.FilePath}");
+        Log.Info($"WhisperLocal {Updater.CurrentVersionText} (Windows) started, config: {_config.FilePath}");
 
-        if (config.Current.Whisper.StartOnLaunch)
+        if (_mainWindow.HasProblems)
+            ShowMainWindow();
+        else if (config.Current.Whisper.StartOnLaunch)
             _ = WarmUpWhisperAsync();
+    }
+
+    // ---- IAppHost: what the shared windows ask for ----
+
+    public ConfigManager Config => _config;
+    public DictationHistory History => _history;
+    public DictationStats Stats => _stats;
+    public string VersionText => Updater.CurrentVersionText;
+    public bool HasGrammarCheck => false;
+
+    public IReadOnlyList<HotkeyPreset> HotkeyPresets { get; } =
+    [
+        new("Left Ctrl + Left Win", "LControlKey+LWin"),
+        new("Right Alt", "RMenu"),
+        new("Left Alt + Left Win", "LMenu+LWin"),
+        new("Left Ctrl + Left Alt", "LControlKey+LMenu"),
+        new("Right Ctrl", "RControlKey"),
+    ];
+
+    public string DescribeHotkey(string key) => KeyboardHook.Describe(key);
+
+    public IReadOnlyList<SetupItem> GetSetupItems()
+    {
+        var items = new List<SetupItem>();
+
+        var microphone = Microphone();
+        items.Add(microphone != null
+            ? new SetupItem(SetupState.Ok, "Microphone: " + microphone)
+            : new SetupItem(SetupState.Error, "No microphone found", "Sound Settings", () => OpenPath("ms-settings:sound")));
+
+        var server = WhisperServerStt.ResolveServerExe(_config.Current.Whisper.ServerExe);
+        items.Add(File.Exists(server)
+            ? new SetupItem(SetupState.Ok, "Speech server: " + Path.GetFileName(server))
+            : new SetupItem(SetupState.Error, "Speech server not found: " + server));
+
+        var model = AppPaths.Resolve(_config.Current.Whisper.ModelPath);
+        var name = Path.GetFileName(model);
+        if (_download is { } download)
+            items.Add(new SetupItem(SetupState.Pending, download.Text, "Cancel", () => download.Cancel.Cancel()));
+        else if (File.Exists(model))
+            items.Add(new SetupItem(SetupState.Ok, $"Model: {name} ({FormatSize(new FileInfo(model).Length)})",
+                "Show Folder", () => OpenPath(Path.GetDirectoryName(model)!)));
+        else
+            items.Add(new SetupItem(SetupState.Error, $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
+
+        items.Add(new SetupItem(SetupState.Ok, $"Hotkey: hold {KeyboardHook.Describe(_config.Current.Hotkey.Key)} to dictate"));
+        return items;
+    }
+
+    /// <summary>The microphone dictation would use; looked up at most every few seconds (the window refreshes often).</summary>
+    private string? Microphone()
+    {
+        var configured = _config.Current.Audio.DeviceName;
+        if (configured != _microphone.Configured || DateTime.UtcNow - _microphone.At > TimeSpan.FromSeconds(5))
+            _microphone = (AudioRecorder.ResolveDeviceName(configured), configured, DateTime.UtcNow);
+        return _microphone.Name;
+    }
+
+    public IReadOnlyList<SetupItem> GetLanguageModelItems() => [];
+
+    public string? StartHotkeyRecording(Action<string> preview, Action<string?> done)
+    {
+        if (_state != State.Idle)
+            return "Finish the current dictation first.";
+        _hook.BeginRecording(
+            keys => preview(KeyboardHook.Describe(KeyboardHook.ToConfigString(keys))),
+            keys => done(keys == null ? null : KeyboardHook.ToConfigString(keys)));
+        return null;
+    }
+
+    public void CancelHotkeyRecording() => _hook.CancelRecording();
+
+    public (bool Loaded, string Detail) GetModelMemory()
+    {
+        var model = AppPaths.Resolve(_config.Current.Whisper.ModelPath);
+        var detail = Path.GetFileName(model);
+        if (File.Exists(model))
+            detail += $" ({FormatSize(new FileInfo(model).Length)})";
+        if (!_stt.IsLoaded)
+            return (false, detail + (_config.Current.Memory.IdleUnloadMinutes > 0
+                ? $"; loads on the next dictation, unloads after {_config.Current.Memory.IdleUnloadMinutes} min idle"
+                : "; loads on the next dictation"));
+        if (_stt.MemoryBytes is { } bytes)
+            detail += $", whisper-server uses {FormatSize(bytes)}";
+        return (true, detail);
+    }
+
+    public Task UnloadAsync() => UnloadFromMemoryAsync();
+
+    public async Task LoadAsync()
+    {
+        _lastActivityUtc = DateTime.UtcNow;
+        await WarmUpWhisperAsync();
+    }
+
+    public void CheckForUpdates() => _ = CheckForUpdatesAsync();
+
+    public void OpenPath(string path, bool textEditor = false)
+    {
+        try
+        {
+            if (textEditor)
+                Process.Start(new ProcessStartInfo("notepad.exe", $"\"{path}\"") { UseShellExecute = false });
+            else
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Cannot open {path}", ex);
+        }
+    }
+
+    public void MainWindowVisibilityChanged(bool visible)
+    {
+    }
+
+    // ---- Dictation ----
+
+    private void ShowMainWindow()
+    {
+        _mainWindow.Refresh();
+        _mainWindow.ShowAndActivate();
+    }
+
+    private void ShowLastTranscript()
+    {
+        if (_lastTranscript.Length > 0)
+            _transcriptWindow.ShowText(_lastTranscript);
     }
 
     private void ApplyConfig()
@@ -119,6 +292,7 @@ internal sealed class TrayApp : ApplicationContext
             return;
         Log.Info("Recording cancelled: another key was pressed while holding the hotkey");
         await _recorder.StopAsync();
+        _overlay.Hide();
         SetState(State.Idle);
     }
 
@@ -129,7 +303,7 @@ internal sealed class TrayApp : ApplicationContext
 
         var cfg = _config.Current;
 
-        // Do not let the user dictate for nothing
+        // Do not let the user dictate for nothing: the main window has the Download button
         var modelPath = AppPaths.Resolve(cfg.Whisper.ModelPath);
         if (!File.Exists(modelPath))
         {
@@ -153,6 +327,8 @@ internal sealed class TrayApp : ApplicationContext
         _pressedAt = Stopwatch.GetTimestamp();
         _lastActivityUtc = DateTime.UtcNow;
         SetState(State.Recording);
+        if (cfg.Ui.ShowOverlay)
+            _overlay.ShowRecording(_pressedAt);
         _ = _pipeline.PrepareAsync();
     }
 
@@ -164,33 +340,89 @@ internal sealed class TrayApp : ApplicationContext
             return;
 
         var cfg = _config.Current;
-        var heldMs = Stopwatch.GetElapsedTime(_pressedAt).TotalMilliseconds;
+        var recordSec = Stopwatch.GetElapsedTime(_pressedAt).TotalSeconds;
+        var processStart = Stopwatch.GetTimestamp();
         SetState(State.Processing);
+        if (cfg.Ui.ShowOverlay)
+            _overlay.ShowProcessing(processStart);
+
+        DictationResult? result = null;
+        string? error = null;
+        var tap = false;
         try
         {
             var pcm = await _recorder.StopAsync();
-            if (heldMs < cfg.Hotkey.MinHoldMs)
+            if (recordSec * 1000 < cfg.Hotkey.MinHoldMs)
             {
-                Log.Debug($"Hotkey tap ignored ({heldMs:F0} ms)");
+                Log.Debug($"Hotkey tap ignored ({recordSec * 1000:F0} ms)");
+                tap = true;
                 return;
             }
 
-            var result = await _pipeline.ProcessAsync(pcm, _target?.ProcessName, CancellationToken.None);
+            result = await _pipeline.ProcessAsync(pcm, _target?.ProcessName, CancellationToken.None);
             if (string.IsNullOrWhiteSpace(result.FinalText))
                 return;
+
+            // Nowhere to type (the desktop, the taskbar): show the text to edit and copy instead of pasting into nothing
+            if (cfg.Insert.ShowWhenNoTextField && ForegroundApp.Capture().AcceptsText() == false)
+            {
+                Log.Info("No text input is focused: showing the transcript instead of pasting");
+                _transcriptWindow.ShowText(result.FinalText, "No text field was focused, so nothing was pasted. Edit and copy it here:");
+                return;
+            }
 
             var text = cfg.Insert.AppendTrailingSpace ? result.FinalText + " " : result.FinalText;
             await _inserter.InsertAsync(text, _target, cfg.Insert);
         }
         catch (Exception ex)
         {
+            error = ex is ModelNotFoundException ? "model not found" : ex.Message;
             ReportError("Dictation failed", ex);
         }
         finally
         {
             _lastActivityUtc = DateTime.UtcNow;
             SetState(State.Idle);
+            if (tap)
+                _overlay.Hide();
+            else
+                ShowOutcome(recordSec, Stopwatch.GetElapsedTime(processStart).TotalSeconds, result, error);
         }
+    }
+
+    /// <summary>The short summary on the indicator, and a record in the history.</summary>
+    private void ShowOutcome(double recordSec, double processSec, DictationResult? result, string? error)
+    {
+        var cfg = _config.Current;
+        var text = result?.FinalText.Trim() ?? "";
+        var words = text.Length == 0 ? 0 : TextFilters.CountWords(text);
+        if (words > 0)
+            _lastTranscript = text;
+
+        if (cfg.Ui.ShowOverlay)
+        {
+            if (error != null)
+                _overlay.ShowResult($"✕ Failed: {error}", Color.FromArgb(255, 102, 102), hasText: false, BriefDisplay);
+            else if (words > 0)
+                _overlay.ShowResult($"✓ {recordSec:F1} s rec · {processSec:F1} s proc · {words} {(words == 1 ? "word" : "words")}",
+                    Color.FromArgb(115, 224, 128), hasText: true, TimeSpan.FromSeconds(Math.Max(1, cfg.Ui.ResultSeconds)));
+            else
+                _overlay.ShowResult($"No speech recognized · {recordSec:F1} s", Color.FromArgb(191, 191, 191), hasText: false, BriefDisplay);
+        }
+
+        var record = new DictationRecord(
+            DateTime.UtcNow,
+            Math.Round(recordSec, 2),
+            Math.Round(processSec, 2),
+            Math.Round((result?.SttMs ?? 0) / 1000.0, 2),
+            words,
+            _target?.ProcessName ?? "",
+            // Keep the text only where the log keeps it too
+            cfg.Logging.LogText ? text : "",
+            error ?? result?.Note ?? "");
+        // Statistics first: the history's Changed event refreshes the window, which shows both
+        _stats.Add(record);
+        _history.Add(record);
     }
 
     private void ToggleEnabled()
@@ -213,6 +445,7 @@ internal sealed class TrayApp : ApplicationContext
         if (_state == State.Recording)
         {
             await _recorder.StopAsync();
+            _overlay.Hide();
             SetState(State.Idle);
         }
 
@@ -227,7 +460,7 @@ internal sealed class TrayApp : ApplicationContext
     private async void CheckIdle()
     {
         var minutes = _config.Current.Memory.IdleUnloadMinutes;
-        if (minutes <= 0 || _state != State.Idle || !IsAnythingLoaded)
+        if (_disposed || minutes <= 0 || _state != State.Idle || !IsAnythingLoaded)
             return;
         if (DateTime.UtcNow - _lastActivityUtc < TimeSpan.FromMinutes(minutes))
             return;
@@ -248,7 +481,95 @@ internal sealed class TrayApp : ApplicationContext
         }
     }
 
-    /// <summary>A missing model gets a dialog with download instructions; other errors a tray balloon.</summary>
+    private async Task DownloadModelAsync(string model)
+    {
+        if (_download != null)
+            return;
+        var download = _download = new Download();
+        var name = Path.GetFileName(model);
+        var url = ModelDownloader.UrlFor(model);
+        download.Text = $"Downloading {name}…";
+
+        var progress = new Progress<(long Done, long? Total)>(p =>
+            download.Text = p.Total is { } total and > 0
+                ? $"Downloading {name}: {FormatSize(p.Done)} of {FormatSize(total)} ({p.Done * 100 / total}%)"
+                : $"Downloading {name}: {FormatSize(p.Done)}");
+        try
+        {
+            await ModelDownloader.DownloadAsync(model, url, progress, () => _ui.Post(_ => download.Text = $"Verifying {name}…", null),
+                download.Cancel.Token);
+            Notify("Model downloaded, ready to dictate", ToolTipIcon.Info);
+        }
+        catch (OperationCanceledException)
+        {
+            Log.Info($"Download of {name} cancelled; it resumes on the next Download");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Download of {name} failed", ex);
+            MessageBox.Show($"{ex.Message}\n\nYou can also download it in a browser:\n{url}\n\nand put it into:\n{Path.GetDirectoryName(model)}",
+                "Download failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _download = null;
+            _mainWindow.Refresh();
+        }
+    }
+
+    /// <summary>Manual update check (never automatic): asks before downloading and installing.</summary>
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_checkingForUpdates)
+            return;
+        if (Updater.Repository == null)
+        {
+            MessageBox.Show("This build does not know where updates are published (it was built without a GitHub repository).",
+                "Updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        _checkingForUpdates = true;
+        try
+        {
+            var release = await Updater.GetLatestAsync(CancellationToken.None);
+            if (release == null || !Updater.IsNewer(release))
+            {
+                MessageBox.Show($"WhisperLocal {Updater.CurrentVersionText} is the latest version.", "You're up to date",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var version = release.Version.ToString(3);
+            var notes = release.Notes.Length > 600 ? release.Notes[..600] + "…" : release.Notes;
+            if (MessageBox.Show($"You have {Updater.CurrentVersionText}.\n\n{notes}".TrimEnd() + "\n\nInstall it and restart WhisperLocal?",
+                    $"WhisperLocal {version} is available", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            if (_state != State.Idle)
+            {
+                MessageBox.Show("Finish the current dictation first, then check for updates again.", "Update",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            Log.Info($"Installing update {release.Tag}");
+            // Download and unpacking take a while: keep the UI thread free
+            await Task.Run(() => Updater.InstallAsync(release, message => _ui.Post(_ => Notify(message, ToolTipIcon.Info), null),
+                CancellationToken.None));
+            ExitApp();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Update failed", ex);
+            MessageBox.Show(ex.Message, "Update failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _checkingForUpdates = false;
+        }
+    }
+
+    /// <summary>A missing model opens the main window (with the Download button); other errors a tray balloon.</summary>
     private void ReportError(string context, Exception ex)
     {
         if (ex is ModelNotFoundException missing)
@@ -263,38 +584,12 @@ internal sealed class TrayApp : ApplicationContext
     private void ShowModelMissing(ModelNotFoundException ex)
     {
         Log.Error(ex.Message.ReplaceLineEndings(" "));
-        // Startup warm-up and a hotkey press may both hit this; one dialog at a time
-        if (_modelDialogOpen)
-            return;
-        _modelDialogOpen = true;
-        try
-        {
-            MessageBox.Show(ex.Message, "WhisperLocal: model not found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-        finally
-        {
-            _modelDialogOpen = false;
-        }
+        ShowMainWindow();
     }
 
     private void SetState(State state)
     {
         _state = state;
-        if (_config.Current.Ui.ShowOverlay)
-        {
-            switch (state)
-            {
-                case State.Recording:
-                    _overlay.ShowState("● Recording", Color.FromArgb(255, 90, 90));
-                    break;
-                case State.Processing:
-                    _overlay.ShowState("… Processing", Color.FromArgb(255, 180, 60));
-                    break;
-                default:
-                    _overlay.Hide();
-                    break;
-            }
-        }
         UpdateTrayState();
     }
 
@@ -317,37 +612,37 @@ internal sealed class TrayApp : ApplicationContext
     private void Notify(string message, ToolTipIcon icon) =>
         _tray.ShowBalloonTip(4000, "WhisperLocal", message, icon);
 
-    private static void OpenFile(string path)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"Cannot open {path}", ex);
-        }
-    }
+    private static string FormatSize(long bytes) =>
+        bytes >= 1L << 30 ? $"{bytes / (double)(1L << 30):F1} GB" : $"{bytes / (double)(1L << 20):F0} MB";
 
     private void ExitApp()
     {
         Log.Info("WhisperLocal exiting");
-        _idleTimer.Stop();
-        _hook.Dispose();
-        _recorder.Dispose();
-        _stt.Dispose();
         _tray.Visible = false;
+        Dispose();
         ExitThread();
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
+        if (disposing && !_disposed)
         {
+            _disposed = true;
+            _download?.Cancel.Cancel();
+            _idleTimer.Stop();
             _hook.Dispose();
             _recorder.Dispose();
             _stt.Dispose();
             _llm.Dispose();
+            try
+            {
+                _mainWindow.CloseForGood();
+                _transcriptWindow.CloseForGood();
+            }
+            catch (Exception ex)
+            {
+                Log.Debug($"Closing windows: {ex.Message}");
+            }
             _tray.Dispose();
             _overlay.Dispose();
             _idleTimer.Dispose();

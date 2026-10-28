@@ -210,6 +210,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         return items;
     }
 
+    public bool HasGrammarCheck => true;
+
     public IReadOnlyList<SetupItem> GetLanguageModelItems()
     {
         var c = _config.Current.LocalLlm;

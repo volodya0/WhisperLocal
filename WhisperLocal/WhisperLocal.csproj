@@ -13,17 +13,37 @@
     <Description>Local push-to-talk dictation (whisper.cpp, Vulkan)</Description>
   </PropertyGroup>
 
+  <!--
+    Size of the app folder: built for Windows x64 only, so the native libraries the UI packages ship for every other
+    platform (SkiaSharp, HarfBuzz, ANGLE for Linux, macOS, x86, ARM64) stay out; .NET itself is not included
+    (the .NET 8 Desktop Runtime is installed separately); English resources only. The output path stays the same.
+  -->
+  <PropertyGroup>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- The shared windows (WhisperLocal.Ui); Avalonia runs on the WinForms message loop -->
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+  </ItemGroup>
+
+  <!-- Where "Check for Updates" looks: owner/repo of the GitHub releases (CI passes -p:UpdateRepository) -->
+  <ItemGroup Condition="'$(UpdateRepository)' != ''">
+    <AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\WhisperLocal.Core\WhisperLocal.Core.csproj" />
+    <ProjectReference Include="..\WhisperLocal.Ui\WhisperLocal.Ui.csproj" />
   </ItemGroup>
 
   <!-- Bundled native runtimes (Runtime\whisper\* → <output>\whisper\*) -->
   <ItemGroup>
-    <None Include="Runtime\**\*" Link="%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Runtime\**\*" Exclude="Runtime\**\whisper-bench.exe" Link="%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Settings live in the project (and in git); the copy next to the exe is the one the app reads -->

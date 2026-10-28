@@ -19,17 +19,24 @@ WhisperLocal lives in the menu bar (the waveform icon); it has no Dock icon.
 
 ### Windows
 
-A ready-to-run download is coming. For now WhisperLocal is built from source: see
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#windows). It needs a GPU with a current driver (AMD, NVIDIA or Intel).
+1. Download `WhisperLocal-windows-x64.zip` from [Releases](https://github.com/volodya0/WhisperLocal/releases/latest).
+2. Unpack it into a folder of your own, for example `Documents\WhisperLocal` (not Program Files: the app keeps its
+   settings, models and updates there).
+3. Start `WhisperLocal.exe`. If Windows SmartScreen warns about an unknown app, click **More info** → **Run anyway**.
 
-## First launch (macOS)
+It needs a GPU with a current driver (AMD, NVIDIA or Intel) and the
+[.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0). WhisperLocal lives in the tray (the
+waveform icon by the clock).
+
+## First launch
 
 The main window opens with a short setup checklist. Fix each line with the button next to it:
 
-- **Accessibility** — needed for the hotkey and for pasting. Turn WhisperLocal on in System Settings →
+- **Accessibility** (macOS) — needed for the hotkey and for pasting. Turn WhisperLocal on in System Settings →
   Privacy & Security → Accessibility; the hotkey works as soon as it is allowed.
-- **Microphone** — allow it when asked.
-- **Model** — press **Download** (3.1 GB, or 1.6 GB for the Turbo model). This happens once.
+- **Microphone** — on macOS, allow it when asked.
+- **Model** — press **Download**. This happens once: 1.6 GB on Windows, where the faster Large v3 Turbo is the
+  default, 3.1 GB for Large v3 on macOS.
 
 When every line is green, the header says *Ready*.
 
@@ -50,13 +57,14 @@ file list), nothing is pasted — the text opens in that window instead.
 ## Settings
 
 Open the main window from the menu bar icon → **Open WhisperLocal…** (or open WhisperLocal from Applications again).
+On Windows, double-click the tray icon.
 
 - **Hotkey** — pick a preset, or press **Record…** and hold any combination you like.
 - **Language** — Ukrainian + English (detected for each dictation) is the default. Other choices: add Russian,
   Ukrainian only, English only, or any language. With a single language, speech in another language comes out
   translated into it.
 - **Speech model** — *Large v3* is the most accurate; *Large v3 Turbo* is several times faster and almost as
-  accurate, the better choice for Macs with 8–16 GB of memory. **Unload** frees the memory right away; this also
+  accurate, the better choice for computers with 8–16 GB of memory (the default on Windows). **Unload** frees the memory right away; this also
   happens by itself after 5 minutes without dictation.
 - **Grammar check** — see below.
 - **Recent dictations** — the last three, with timings. **All history** and **Statistics** (words, speaking time,
@@ -64,8 +72,7 @@ Open the main window from the menu bar icon → **Open WhisperLocal…** (or ope
 - **Files** — open the config file, the log, or the data folder.
 
 Everything else (start at login, which microphone, English terms that get misheard…) is in the config file: see
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md). On Windows all settings live there for now: tray icon →
-**Open config**; changes apply as soon as you save.
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md). Changes apply as soon as you save it.
 
 ## Grammar check (macOS, optional)
 
@@ -75,14 +82,15 @@ the corrected text or copy it; or just ignore it — it goes away by itself. It 
 
 ## Menu
 
+The menu bar icon on macOS, the tray icon on Windows:
+
 - **Open WhisperLocal…** — the main window.
 - **Show Last Transcript** — the text of the last dictation.
-- **Check for Updates…** — looks for a new version and, if you agree, installs it and restarts.
+- **Check for Updates…** — looks for a new version and, if you agree, installs it and restarts. Your settings,
+  models and history stay.
 - **Enabled** — pause or resume dictation.
 - **Unload from memory** — free the memory the models use; the next dictation loads them again.
 - **Quit WhisperLocal**.
-
-On Windows the tray menu has Enabled, Unload from memory, Open config, Open log and Exit.
 
 ## Troubleshooting
 
@@ -96,7 +104,7 @@ On Windows the tray menu has Enabled, Unload from memory, Open config, Open log 
   app; run WhisperLocal as administrator too.
 - **Slow on a Windows PC with two GPUs.** It may be using the integrated one: see
   [choosing the GPU](docs/CONFIGURATION.md#choosing-the-gpu-windows).
-- Anything else: the log (main window → **Log**, or tray → **Open log**) usually says what went wrong.
+- Anything else: the log (main window → **Log**) usually says what went wrong.
 
 ## Privacy
 

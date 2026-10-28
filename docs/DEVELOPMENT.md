@@ -22,11 +22,12 @@ Hotkey → microphone capture → 16 kHz mono PCM
    cd WhisperLocal
    dotnet build WhisperLocal.sln -c Release
    ```
-3. Download the model (~3 GB, SHA256-verified) into `models\` next to the exe:
+3. Download the model (Large v3 Turbo, 1.6 GB, the Windows default) into `models\` next to the exe, or press
+   **Download** in the app's setup checklist:
    ```
    powershell -ExecutionPolicy Bypass -File scripts\get-model.ps1 -Configuration Release
    ```
-   Without it the app shows a "model not found" dialog with the exact folder and download link.
+   Without it the app opens its main window, whose setup checklist has the Download button.
 4. Run `WhisperLocal\bin\Release\net8.0-windows\WhisperLocal.exe`.
 5. With several GPUs, see [choosing the GPU](CONFIGURATION.md#choosing-the-gpu-windows).
 
@@ -41,7 +42,7 @@ WhisperLocal\bin\<Configuration>\net8.0-windows\
   WhisperLocal.exe
   config.json                  the copy the app reads
   whisper\                     copied from Runtime\whisper
-  models\ggml-large-v3.bin     downloaded, not in git
+  models\ggml-large-v3-turbo.bin  downloaded, not in git
   logs\                        app log and whisper-server.log
 ```
 
@@ -74,20 +75,22 @@ Notifications are shown through `osascript`, so they appear as coming from Scrip
 
 ## CI and releases
 
-`.github/workflows/macos.yml` builds the macOS DMG on GitHub's Mac runners (Apple Silicon) for every push to `main`,
-every pull request and on demand, runs the app's `--self-test`, and keeps the DMG as a workflow artifact.
+`.github/workflows/macos.yml` ("Build") runs on every push to any branch, every pull request and on demand. It
+builds the macOS DMG on GitHub's Mac runners (Apple Silicon) and the Windows app on a Windows runner, runs each app's
+`--self-test`, and keeps the DMG and a zip of the Windows app folder as workflow artifacts.
 
-- Every push to `main` is released automatically as `v1.0.<run number>`.
+- Every push to `main` is released automatically as `v1.0.<run number>`, with both downloads.
 - A pushed tag like `v1.2.0` is released with that version.
 
-The release's notes are the commit message; "Check for Updates…" in the app reads the latest release of the
-repository it was built from, verifies the DMG's checksum and signer, replaces the app and restarts.
+The release's notes are the commit message. "Check for Updates…" in the apps reads the latest release of the
+repository they were built from (`-p:UpdateRepository`) and verifies the download's checksum. macOS also checks the
+DMG's signer, replaces the app and restarts; Windows unpacks the zip and, once the app has quit, copies it over the
+app folder (keeping `config.json`) and starts it again.
 
 With the repository secrets `MACOS_CERT_P12` (base64 of a `.p12` with a code signing certificate; self-signed is
 enough) and `MACOS_CERT_PASSWORD`, every build carries the same signature, so the Accessibility permission survives
 updates. Without them builds are signed ad hoc.
 
-Windows is not built by CI yet.
 
 ## Batch evaluation
 
