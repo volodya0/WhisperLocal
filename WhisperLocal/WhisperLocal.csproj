@@ -15,10 +15,13 @@
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- The shared windows (WhisperLocal.Ui); Avalonia runs on the WinForms message loop -->
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\WhisperLocal.Core\WhisperLocal.Core.csproj" />
+    <ProjectReference Include="..\WhisperLocal.Ui\WhisperLocal.Ui.csproj" />
   </ItemGroup>
 
   <!-- Bundled native runtimes (Runtime\whisper\* → <output>\whisper\*) -->

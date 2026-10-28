@@ -88,6 +88,8 @@ public sealed class MainWindow : Window
         _record = DarkTheme.Button("Record…", ToggleHotkeyRecording, small: true);
         _memoryButton = DarkTheme.Button("", () => _ = ToggleMemoryAsync(), small: true);
         _memoryButton.MinWidth = 72;
+        var languageModel = DarkTheme.Section("Language model", LanguageModelSection());
+        languageModel.IsVisible = host.HasGrammarCheck;
 
         Content = new ScrollViewer
         {
@@ -102,7 +104,7 @@ public sealed class MainWindow : Window
                     DarkTheme.Section("Setup", _setup),
                     DarkTheme.Section("", HotkeyAndLanguageSection()),
                     DarkTheme.Section("Speech model", MemorySection()),
-                    DarkTheme.Section("Language model", LanguageModelSection()),
+                    languageModel,
                     DarkTheme.Section("Recent dictations", new StackPanel { Spacing = 4, Children = { _history, _historyNote } },
                         new StackPanel
                         {
@@ -593,6 +595,8 @@ public sealed class MainWindow : Window
 
     private void RefreshHints()
     {
+        if (!_host.HasGrammarCheck)
+            return;
         var cfg = _host.Config.Current;
         var model = cfg.LocalLlm.ModelPath;
         _updatingHints = true;

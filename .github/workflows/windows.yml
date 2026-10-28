@@ -1,0 +1,54 @@
+# Builds the Windows app on GitHub's Windows runners, checks that it starts its shared windows (--self-test),
+# and keeps a zip of the app folder (exe, bundled whisper-server, config) as a workflow artifact.
+# The model is not included: the app downloads it from the setup checklist.
+name: Windows build
+
+on:
+  push:
+    branches: [main, windows-ui]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build WhisperLocal/WhisperLocal.csproj -c Release 2>&1 | Tee-Object -FilePath build.log; exit $LASTEXITCODE
+
+      - name: Self-test the app (shared windows start)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath WhisperLocal/bin/Release/net8.0-windows/WhisperLocal.exe -ArgumentList '--self-test' `
+            -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest.out -RedirectStandardError selftest.err
+          Get-Content selftest.out, selftest.err | Tee-Object -FilePath build.log -Append
+          exit $p.ExitCode
+
+      # The error lines as an annotation, readable from the checks API without access to the full logs
+      - name: Report build failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $lines = Get-Content build.log -ErrorAction SilentlyContinue | Select-String -Pattern 'error|failed' | Select-Object -Last 15
+          $text = ($lines | ForEach-Object { $_.Line.Substring(0, [Math]::Min(250, $_.Line.Length)) }) -join '%0A'
+          Write-Output "::error title=Windows build failed::$text"
+
+      - name: Zip the app
+        shell: pwsh
+        run: Compress-Archive -Path WhisperLocal/bin/Release/net8.0-windows/* -DestinationPath WhisperLocal-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WhisperLocal-windows-x64
+          path: WhisperLocal-windows-x64.zip
+          if-no-files-found: error

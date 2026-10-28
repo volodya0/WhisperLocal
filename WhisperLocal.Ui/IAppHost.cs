@@ -22,6 +22,9 @@ public interface IAppHost
     /// <summary>Permissions, server, model, hotkey: what has to be in place before dictation works.</summary>
     IReadOnlyList<SetupItem> GetSetupItems();
 
+    /// <summary>Whether the app has the grammar check; without it the main window leaves out the Language model card.</summary>
+    bool HasGrammarCheck { get; }
+
     /// <summary>Grammar check: the language model (Download, Unload) and its server.</summary>
     IReadOnlyList<SetupItem> GetLanguageModelItems();
 
