@@ -45,8 +45,11 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private readonly WhisperServerStt _stt;
     private readonly OllamaCleaner _llm;
     private readonly DictationPipeline _pipeline;
+    private readonly LlamaServer _llama;
+    private readonly Suggester _suggester;
     private readonly MacTextInserter _inserter = new();
     private readonly RecordingOverlay _overlay;
+    private readonly SuggestionPanel _hints;
     private readonly TranscriptWindow _transcriptWindow = new();
     private readonly MainWindow _mainWindow;
     private readonly System.Threading.Timer _idleTimer;
@@ -58,9 +61,19 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private FrontmostApp? _target;
     private string _lastTranscript = "";
     private bool _checkingForUpdates;
-    private CancellationTokenSource? _download;
-    private string? _downloadText;
+    private Download? _download;
+    private Download? _llmDownload;
+    private CancellationTokenSource? _hintRequest;
+    private IReadOnlyList<string> _shownHints = [];
+    private FrontmostApp? _hintTarget;
     private bool _disposed;
+
+    /// <summary>A model download in progress: what the setup line shows, and how to cancel it.</summary>
+    private sealed class Download
+    {
+        public CancellationTokenSource Cancel { get; } = new();
+        public string Text { get; set; } = "";
+    }
 
     public MenuBarApp(ConfigManager config, IClassicDesktopStyleApplicationLifetime desktop)
     {
@@ -73,7 +86,10 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _stt = new WhisperServerStt(config);
         _llm = new OllamaCleaner(config);
         _pipeline = new DictationPipeline(config, _stt, _llm);
+        _llama = new LlamaServer(config);
+        _suggester = new Suggester(config, _llama);
         _overlay = new RecordingOverlay(_ui, ShowLastTranscript);
+        _hints = new SuggestionPanel(_ui, index => _ = InsertHintAsync(index));
         _mainWindow = new MainWindow(this, _transcriptWindow);
 
         _menu = new StatusMenu();
@@ -99,6 +115,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _hotkey.HotkeyDown += OnHotkeyDown;
         _hotkey.HotkeyUp += OnHotkeyUp;
         _hotkey.HotkeyCancel += OnHotkeyCancel;
+        _hotkey.HintChosen += index => _ = InsertHintAsync(index);
+        _hotkey.HintsDismissed += DismissHints;
+        _hints.Expired += DismissHints;
         _hotkey.PermissionMissing += () => Dialogs.Notify(
             "Allow WhisperLocal in System Settings → Privacy & Security → Accessibility. The hotkey starts working as soon as it is allowed.");
         _hotkey.Installed += () => Dialogs.Notify($"Ready: hold {HotkeyTap.Describe(_config.Current.Hotkey.Key)} to dictate");
@@ -173,8 +192,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
         var model = AppPaths.Resolve(_config.Current.Whisper.ModelPath);
         var name = Path.GetFileName(model);
-        if (_download != null)
-            items.Add(new SetupItem(SetupState.Pending, _downloadText ?? $"Downloading {name}…", "Cancel", () => _download?.Cancel()));
+        if (_download is { } download)
+            items.Add(new SetupItem(SetupState.Pending, download.Text, "Cancel", () => download.Cancel.Cancel()));
         else if (File.Exists(model))
             items.Add(new SetupItem(SetupState.Ok, $"Model: {name} ({FormatSize(new FileInfo(model).Length)})",
                 "Show Folder", () => Dialogs.Open(Path.GetDirectoryName(model)!)));
@@ -187,6 +206,42 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             : new SetupItem(SetupState.Pending, $"Hotkey {hotkey}: waiting for Accessibility"));
 
         return items;
+    }
+
+    public IReadOnlyList<SetupItem> GetSuggestionItems()
+    {
+        var c = _config.Current.Suggest;
+        var items = new List<SetupItem>();
+
+        var server = LlamaServer.ResolveServerExe(c);
+        if (!File.Exists(server))
+            items.Add(new SetupItem(SetupState.Error, "Language model server not found: " + server));
+
+        var model = LlamaServer.ResolveModel(c);
+        var name = Path.GetFileName(model);
+        var known = LlmModels.Find(model);
+        if (_llmDownload is { } download)
+            items.Add(new SetupItem(SetupState.Pending, download.Text, "Cancel", () => download.Cancel.Cancel()));
+        else if (!File.Exists(model))
+            items.Add(known != null
+                ? new SetupItem(SetupState.Warning, $"Not downloaded yet: {name} ({known.Size})", "Download", () => _ = DownloadLlmAsync(model, known.Url))
+                : new SetupItem(SetupState.Error, $"Model not found: {model}", "Show Folder", () => OpenFolder(model)));
+        else if (_llama.IsLoaded)
+            items.Add(new SetupItem(SetupState.Ok,
+                $"{name}: loaded" + (_llama.MemoryBytes is { } bytes ? $", llama-server uses {FormatSize(bytes)}" : ""),
+                "Unload", _llama.Unload));
+        else
+            items.Add(new SetupItem(SetupState.Ok,
+                $"{name} ({FormatSize(new FileInfo(model).Length)}): loads when you start dictating", "Show Folder", () => OpenFolder(model)));
+
+        return items;
+    }
+
+    private static void OpenFolder(string file)
+    {
+        var folder = Path.GetDirectoryName(file)!;
+        Directory.CreateDirectory(folder);
+        Dialogs.Open(folder);
     }
 
     public string? StartHotkeyRecording(Action<string> preview, Action<string?> done)
@@ -283,6 +338,13 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         }
         _hotkey.SuppressKey = cfg.Hotkey.SuppressKey;
 
+        if (!cfg.Suggest.Enabled)
+        {
+            DismissHints();
+            if (_llama.IsLoaded)
+                _llama.Unload();
+        }
+
         try
         {
             LaunchAgent.Apply(cfg.StartWithWindows);
@@ -309,6 +371,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     {
         if (!_enabled || _state != State.Idle)
             return;
+        DismissHints();
 
         var cfg = _config.Current;
 
@@ -339,6 +402,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (cfg.Ui.ShowOverlay)
             _overlay.ShowRecording(_pressedAt);
         _ = _pipeline.PrepareAsync();
+        _ = _suggester.PreloadAsync();
     }
 
     private void OnHotkeyUp() => _ = FinishRecordingAsync();
@@ -373,7 +437,14 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
                 return;
 
             var text = cfg.Insert.AppendTrailingSpace ? result.FinalText + " " : result.FinalText;
-            await _inserter.InsertAsync(text, _target, cfg.Insert);
+            var inserted = InsertAsync(text, _target);
+            if (_suggester.IsAvailable)
+            {
+                // The hints are generated while the text is being pasted
+                _suggester.Remember(_target?.ProcessName, result.FinalText);
+                RequestHints(_target, inserted);
+            }
+            await inserted;
         }
         catch (Exception ex)
         {
@@ -426,6 +497,102 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _history.Add(record);
     }
 
+    // ---- Continuation hints ----
+
+    /// <summary>Pastes the text; returns when it was done, the moment typing by the user starts to count.</summary>
+    private async Task<long> InsertAsync(string text, FrontmostApp? target)
+    {
+        await _inserter.InsertAsync(text, target, _config.Current.Insert);
+        return Stopwatch.GetTimestamp();
+    }
+
+    /// <summary>Asks for hints that continue the text just pasted (by <paramref name="inserted"/>) and shows them.</summary>
+    private void RequestHints(FrontmostApp? target, Task<long> inserted)
+    {
+        _hintRequest?.Cancel();
+        var request = _hintRequest = new CancellationTokenSource();
+        _ = ShowHintsAsync(target, inserted, request);
+    }
+
+    private async Task ShowHintsAsync(FrontmostApp? target, Task<long> inserted, CancellationTokenSource request)
+    {
+        try
+        {
+            var hints = await _suggester.SuggestAsync(target?.ProcessName, request.Token);
+            var insertedAt = await inserted;
+            if (request.IsCancellationRequested || _state != State.Idle || hints.Count == 0)
+                return;
+
+            // Typing after the paste means the user went on without hints; showing them now would only get in the way
+            var sinceKey = MacNative.CGEventSourceSecondsSinceLastEventType(MacNative.kCGEventSourceStateHIDSystemState, MacNative.kCGEventKeyDown);
+            if (sinceKey < Stopwatch.GetElapsedTime(insertedAt).TotalSeconds)
+            {
+                Log.Debug("Hints dropped: the user is typing");
+                return;
+            }
+
+            var count = Math.Min(hints.Count, SuggestionPanel.MaxRows);
+            _shownHints = hints.Take(count).ToList();
+            _hintTarget = target;
+            _hints.Show(_shownHints, TimeSpan.FromSeconds(Math.Max(2, _config.Current.Suggest.DisplaySeconds)));
+            _hotkey.HintCount = count;
+        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested)
+        {
+            // A new dictation or a key press came first
+        }
+        catch (OperationCanceledException)
+        {
+            Log.Warn($"Hints took longer than {_config.Current.Suggest.TimeoutMs} ms (Suggest.TimeoutMs), dropped");
+        }
+        catch (Exception ex)
+        {
+            // The dictation itself succeeded; a notification for every failed hint would be noise
+            Log.Warn($"Hints failed: {ex.Message}");
+        }
+        finally
+        {
+            if (_hintRequest == request)
+                _hintRequest = null;
+            request.Dispose();
+        }
+    }
+
+    private void DismissHints()
+    {
+        _hintRequest?.Cancel();
+        _hintRequest = null;
+        _hotkey.HintCount = 0;
+        _hints.Hide();
+        _shownHints = [];
+    }
+
+    /// <summary>Pastes hint <paramref name="index"/> (Option+digit or a click), then asks for the next hints.</summary>
+    private async Task InsertHintAsync(int index)
+    {
+        var hints = _shownHints;
+        var target = _hintTarget;
+        DismissHints();
+        if (index < 0 || index >= hints.Count || _state != State.Idle)
+            return;
+
+        var hint = hints[index];
+        Log.Info($"Hint {index + 1} chosen");
+        _lastActivityUtc = DateTime.UtcNow;
+        try
+        {
+            var inserted = InsertAsync(_config.Current.Insert.AppendTrailingSpace ? hint + " " : hint, target);
+            _suggester.Remember(target?.ProcessName, hint);
+            if (_suggester.IsAvailable)
+                RequestHints(target, inserted);
+            await inserted;
+        }
+        catch (Exception ex)
+        {
+            ReportError("Inserting the hint failed", ex);
+        }
+    }
+
     private void ToggleEnabled()
     {
         _enabled = !_enabled;
@@ -450,13 +617,15 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             SetState(State.Idle);
         }
 
+        DismissHints();
         _stt.Unload();
+        _llama.Unload();
         if (_config.Current.Llm.Enabled)
             await _llm.UnloadAsync();
         Log.Info("Unloaded from memory: all servers stopped, models released");
     }
 
-    private bool IsAnythingLoaded => _stt.IsLoaded;
+    private bool IsAnythingLoaded => _stt.IsLoaded || _llama.IsLoaded;
 
     private async void CheckIdle()
     {
@@ -504,35 +673,62 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     {
         if (_download != null)
             return;
-        _download = new CancellationTokenSource();
+        var download = _download = new Download();
+        try
+        {
+            if (await DownloadAsync(model, ModelDownloader.UrlFor(model), download))
+                Dialogs.Notify("Model downloaded, ready to dictate");
+        }
+        finally
+        {
+            _download = null;
+            _mainWindow.Refresh();
+        }
+    }
+
+    private async Task DownloadLlmAsync(string model, string url)
+    {
+        if (_llmDownload != null)
+            return;
+        var download = _llmDownload = new Download();
+        try
+        {
+            if (await DownloadAsync(model, url, download))
+                Dialogs.Notify("Language model downloaded: hints appear after your next dictation");
+        }
+        finally
+        {
+            _llmDownload = null;
+            _mainWindow.Refresh();
+        }
+    }
+
+    /// <summary>Downloads <paramref name="model"/>, keeping <see cref="Download.Text"/> up to date; false if cancelled or failed.</summary>
+    private async Task<bool> DownloadAsync(string model, string url, Download download)
+    {
         var name = Path.GetFileName(model);
-        _downloadText = $"Downloading {name}…";
+        download.Text = $"Downloading {name}…";
 
         var progress = new Progress<(long Done, long? Total)>(p =>
-            _downloadText = p.Total is { } total and > 0
+            download.Text = p.Total is { } total and > 0
                 ? $"Downloading {name}: {FormatSize(p.Done)} of {FormatSize(total)} ({p.Done * 100 / total}%)"
                 : $"Downloading {name}: {FormatSize(p.Done)}");
         try
         {
-            await ModelDownloader.DownloadAsync(model, progress, () => _ui.Post(_ => _downloadText = $"Verifying {name}…", null), _download.Token);
-            Dialogs.Notify("Model downloaded, ready to dictate");
+            await ModelDownloader.DownloadAsync(model, url, progress, () => _ui.Post(_ => download.Text = $"Verifying {name}…", null),
+                download.Cancel.Token);
+            return true;
         }
         catch (OperationCanceledException)
         {
-            Log.Info("Model download cancelled; it resumes on the next Download");
+            Log.Info($"Download of {name} cancelled; it resumes on the next Download");
         }
         catch (Exception ex)
         {
-            Log.Error("Model download failed", ex);
-            Dialogs.Show("Model download failed", $"{ex.Message}\n\nYou can also download it in a browser:\n{ModelDownloader.UrlFor(model)}\n\nand put it into:\n{Path.GetDirectoryName(model)}");
+            Log.Error($"Download of {name} failed", ex);
+            Dialogs.Show("Download failed", $"{ex.Message}\n\nYou can also download it in a browser:\n{url}\n\nand put it into:\n{Path.GetDirectoryName(model)}");
         }
-        finally
-        {
-            _download.Dispose();
-            _download = null;
-            _downloadText = null;
-            _mainWindow.Refresh();
-        }
+        return false;
     }
 
     /// <summary>Manual update check (never automatic): asks before downloading and installing.</summary>
@@ -635,20 +831,28 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     }
 
     /// <summary>Stops whisper-server; safe to call from any thread (used on SIGTERM / logout).</summary>
-    public void StopServers() => _stt.Dispose();
+    public void StopServers()
+    {
+        _stt.Dispose();
+        _llama.Dispose();
+    }
 
     public void Dispose()
     {
         if (_disposed)
             return;
         _disposed = true;
-        _download?.Cancel();
+        _download?.Cancel.Cancel();
+        _llmDownload?.Cancel.Cancel();
+        _hintRequest?.Cancel();
         _idleTimer.Dispose();
         _hotkey.Dispose();
         _recorder.Dispose();
         _stt.Dispose();
         _llm.Dispose();
+        _llama.Dispose();
         _overlay.Dispose();
+        _hints.Dispose();
         try
         {
             _mainWindow.CloseForGood();

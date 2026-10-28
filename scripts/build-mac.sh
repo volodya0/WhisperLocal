@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds WhisperLocal.app for macOS:
 #   1. whisper.cpp's whisper-server with Metal (once; cached in WhisperLocal.Mac/Runtime/whisper, not in git)
+#      and llama.cpp's llama-server for the continuation hints (cached in WhisperLocal.Mac/Runtime/llama)
 #   2. the .NET app, self-contained, for this Mac's architecture
 #   3. the .app bundle, signed ad hoc (or with $CODESIGN_IDENTITY)
 #
@@ -10,6 +11,7 @@
 #   scripts/build-mac.sh --install        # also copies it to ~/Applications
 #   scripts/build-mac.sh --dmg            # also packs it into artifacts/WhisperLocal-<arch>.dmg (drag to Applications)
 #   WHISPER_CPP_TAG=v1.9.5 scripts/build-mac.sh --rebuild-whisper
+#   LLAMA_CPP_TAG=b11940 scripts/build-mac.sh --rebuild-llama
 #
 # Environment:
 #   VERSION             app version, e.g. 1.1.0 (CI passes the release tag); default: the project's <Version>
@@ -19,18 +21,22 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 WHISPER_CPP_TAG="${WHISPER_CPP_TAG:-v1.9.5}"
+LLAMA_CPP_TAG="${LLAMA_CPP_TAG:-b11940}"
 RUNTIME="$REPO/WhisperLocal.Mac/Runtime/whisper"
+LLAMA_RUNTIME="$REPO/WhisperLocal.Mac/Runtime/llama"
 WORK="$REPO/artifacts/build"
 APP="$REPO/artifacts/WhisperLocal.app"
 
 INSTALL=0
 DMG=0
 REBUILD_WHISPER=0
+REBUILD_LLAMA=0
 for arg in "$@"; do
     case "$arg" in
         --install) INSTALL=1 ;;
         --dmg) DMG=1 ;;
         --rebuild-whisper) REBUILD_WHISPER=1 ;;
+        --rebuild-llama) REBUILD_LLAMA=1 ;;
         *) echo "Unknown option: $arg" >&2; exit 2 ;;
     esac
 done
@@ -69,6 +75,33 @@ else
     echo "==> Using cached whisper-server ($(cat "$RUNTIME/VERSION" 2>/dev/null || echo unknown version)); --rebuild-whisper to rebuild"
 fi
 
+# 1b. llama-server for the continuation hints (Metal; static; no HTTPS/curl: models are downloaded by the app)
+if [[ $REBUILD_LLAMA == 1 || ! -x "$LLAMA_RUNTIME/llama-server" || "$(cat "$LLAMA_RUNTIME/VERSION" 2>/dev/null)" != "$LLAMA_CPP_TAG" ]]; then
+    need git "Install the Xcode Command Line Tools: xcode-select --install"
+    need cmake "Install CMake: brew install cmake"
+    echo "==> Building llama.cpp $LLAMA_CPP_TAG (llama-server, Metal)"
+    rm -rf "$WORK/llama.cpp"
+    mkdir -p "$WORK"
+    git clone --depth 1 --branch "$LLAMA_CPP_TAG" https://github.com/ggml-org/llama.cpp "$WORK/llama.cpp"
+    cmake -S "$WORK/llama.cpp" -B "$WORK/llama.cpp/build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DGGML_METAL=ON \
+        -DGGML_METAL_EMBED_LIBRARY=ON \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_OPENSSL=OFF \
+        -DLLAMA_BUILD_UI=OFF \
+        -DLLAMA_USE_PREBUILT_UI=OFF
+    cmake --build "$WORK/llama.cpp/build" --config Release --target llama-server -j "$(sysctl -n hw.ncpu)"
+    mkdir -p "$LLAMA_RUNTIME"
+    cp "$WORK/llama.cpp/build/bin/llama-server" "$LLAMA_RUNTIME/"
+    echo "$LLAMA_CPP_TAG" > "$LLAMA_RUNTIME/VERSION"
+else
+    echo "==> Using cached llama-server ($LLAMA_CPP_TAG); --rebuild-llama to rebuild"
+fi
+
 # 2. .NET app
 if [[ -z "${UPDATE_REPOSITORY:-}" ]]; then
     # git@github.com:owner/repo.git or https://github.com/owner/repo(.git) → owner/repo
@@ -94,7 +127,7 @@ if [[ -n "${VERSION:-}" ]]; then
 fi
 cp "$REPO/WhisperLocal.Mac/Resources/AppIcon.icns" "$APP/Contents/Resources/"
 cp -R "$WORK/publish/." "$APP/Contents/MacOS/"
-chmod +x "$APP/Contents/MacOS/WhisperLocal" "$APP/Contents/MacOS/whisper/whisper-server"
+chmod +x "$APP/Contents/MacOS/WhisperLocal" "$APP/Contents/MacOS/whisper/whisper-server" "$APP/Contents/MacOS/llama/llama-server"
 
 # Ad-hoc signatures change with every build, and macOS then forgets the Accessibility permission.
 # Signing with a stable identity (e.g. a self-signed "Code Signing" certificate from Keychain Access) avoids that.

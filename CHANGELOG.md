@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Continuation hints (macOS, off by default): after a dictation a local LLM suggests a few ways to continue the text
+  in a panel above the indicator; Option+1…3 or a click inserts one. Runs in a bundled llama.cpp `llama-server`
+  (Metal) built by `scripts/build-mac.sh`; the GGUF model (Gemma 3 4B / 12B, Qwen 3 4B) is chosen and downloaded in the
+  main window, no Ollama needed. Settings in the new `Suggest` config section, which the main window adds to older configs.
 - macOS version (`WhisperLocal.Mac`): menu bar app with a CGEventTap push-to-talk hotkey, AudioQueue capture,
   whisper-server built with Metal, pasteboard + Cmd+V insertion, LaunchAgent autostart and `--batch` via `afconvert`.
   `scripts/build-mac.sh` builds `WhisperLocal.app`, `scripts/get-model.sh` downloads the model.

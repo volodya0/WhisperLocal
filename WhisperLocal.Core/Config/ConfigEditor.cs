@@ -9,7 +9,10 @@ namespace WhisperLocal.Config;
 /// </summary>
 public static class ConfigEditor
 {
-    /// <summary>Sets "<paramref name="section"/>": { "<paramref name="property"/>": value } to <paramref name="value"/>.</summary>
+    /// <summary>
+    /// Sets "<paramref name="section"/>": { "<paramref name="property"/>": value } to <paramref name="value"/>,
+    /// adding the property (and the section) if a config from an older version lacks them.
+    /// </summary>
     public static void SetValue<T>(string path, string section, string property, T value)
     {
         var bytes = File.ReadAllBytes(path);
@@ -23,8 +26,18 @@ public static class ConfigEditor
         });
 
         var inSection = false;
+        int? rootStart = null, sectionStart = null;
         while (reader.Read())
         {
+            if (reader.TokenType == JsonTokenType.StartObject)
+            {
+                // Just after "{": where a missing property or section goes
+                if (reader.CurrentDepth == 0)
+                    rootStart ??= bom + (int)reader.BytesConsumed;
+                else if (reader.CurrentDepth == 1 && inSection)
+                    sectionStart ??= bom + (int)reader.BytesConsumed;
+                continue;
+            }
             if (reader.TokenType != JsonTokenType.PropertyName)
                 continue;
             var name = reader.GetString();
@@ -41,16 +54,33 @@ public static class ConfigEditor
                 throw new InvalidOperationException($"{section}.{property} is not a simple value");
             var start = bom + (int)reader.TokenStartIndex;
             var end = bom + (int)reader.BytesConsumed;
-            var replacement = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, ConfigManager.JsonOptions));
-
-            var result = new byte[bytes.Length - (end - start) + replacement.Length];
-            bytes.AsSpan(0, start).CopyTo(result);
-            replacement.CopyTo(result.AsSpan(start));
-            bytes.AsSpan(end).CopyTo(result.AsSpan(start + replacement.Length));
-            File.WriteAllBytes(path, result);
-            Log.Info($"Config: {section}.{property} = {Encoding.UTF8.GetString(replacement)}");
+            var replacement = Serialize(value);
+            Write(path, bytes, start, end, replacement);
+            Log.Info($"Config: {section}.{property} = {replacement}");
             return;
         }
-        throw new InvalidOperationException($"{section}.{property} not found in {path}; add it to the config by hand");
+
+        // A trailing comma before "}" is fine: the config is read with AllowTrailingCommas
+        var serialized = Serialize(value);
+        if (sectionStart is { } at)
+            Write(path, bytes, at, at, $"\n    \"{property}\": {serialized},");
+        else if (rootStart is { } root)
+            Write(path, bytes, root, root, $"\n  \"{section}\": {{\n    \"{property}\": {serialized}\n  }},");
+        else
+            throw new InvalidOperationException($"{path} is not a JSON object");
+        Log.Info($"Config: {section}.{property} = {serialized} (added)");
+    }
+
+    private static string Serialize<T>(T value) => JsonSerializer.Serialize(value, ConfigManager.JsonOptions);
+
+    /// <summary>Replaces bytes [start, end) of the file with <paramref name="text"/>.</summary>
+    private static void Write(string path, byte[] bytes, int start, int end, string text)
+    {
+        var replacement = Encoding.UTF8.GetBytes(text);
+        var result = new byte[bytes.Length - (end - start) + replacement.Length];
+        bytes.AsSpan(0, start).CopyTo(result);
+        replacement.CopyTo(result.AsSpan(start));
+        bytes.AsSpan(end).CopyTo(result.AsSpan(start + replacement.Length));
+        File.WriteAllBytes(path, result);
     }
 }

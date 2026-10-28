@@ -61,6 +61,7 @@ internal static unsafe class MacNative
     [DllImport(CoreGraphics)] public static extern void CGEventPost(int tap, IntPtr evt);
     [DllImport(CoreGraphics)] [return: MarshalAs(UnmanagedType.I1)] public static extern bool CGEventSourceKeyState(int stateId, ushort keycode);
     [DllImport(CoreGraphics)] public static extern ulong CGEventSourceFlagsState(int stateId);
+    [DllImport(CoreGraphics)] public static extern double CGEventSourceSecondsSinceLastEventType(int stateId, uint eventType);
     [DllImport(CoreGraphics)] public static extern IntPtr CGColorCreateGenericGray(double gray, double alpha);
     [DllImport(CoreGraphics)] public static extern void CGColorRelease(IntPtr color);
 

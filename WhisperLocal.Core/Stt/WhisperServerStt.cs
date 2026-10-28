@@ -127,7 +127,7 @@ public sealed class WhisperServerStt : ISpeechToText
     /// <summary>"uk", "auto" or a list "uk,en" (the first is the main language).</summary>
     internal static List<string> ParseLanguages(string value)
     {
-        var list = value.Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        var list = value.Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(l => l.ToLowerInvariant())
             .Distinct()
             .ToList();

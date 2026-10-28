@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 namespace WhisperLocal.Stt;
 
 /// <summary>
-/// Downloads a ggml Whisper model from HuggingFace (resuming a partial download) and verifies known hashes,
+/// Downloads a ggml Whisper model (or an LLM for the continuation hints) from HuggingFace (resuming a partial download) and verifies known hashes,
 /// like scripts/get-model.ps1 and get-model.sh.
 /// </summary>
 public static class ModelDownloader
@@ -20,11 +20,14 @@ public static class ModelDownloader
 
     /// <param name="progress">Bytes downloaded and total size (null if unknown); reported a few times per second.</param>
     /// <param name="verifying">Raised before the hash check, which takes a few seconds for a 3 GB file.</param>
-    public static async Task DownloadAsync(string modelPath, IProgress<(long Done, long? Total)> progress, Action verifying, CancellationToken ct)
+    public static Task DownloadAsync(string modelPath, IProgress<(long Done, long? Total)> progress, Action verifying, CancellationToken ct) =>
+        DownloadAsync(modelPath, UrlFor(modelPath), progress, verifying, ct);
+
+    /// <summary>Any model file (e.g. an LLM's GGUF) from <paramref name="url"/>; verified only if its hash is known.</summary>
+    public static async Task DownloadAsync(string modelPath, string url, IProgress<(long Done, long? Total)> progress, Action verifying, CancellationToken ct)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
         var partial = modelPath + ".partial";
-        var url = UrlFor(modelPath);
 
         using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         using var request = new HttpRequestMessage(HttpMethod.Get, url);

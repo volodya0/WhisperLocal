@@ -98,6 +98,18 @@ internal sealed unsafe class HotkeyTap : IDisposable
     public bool SuppressKey { get; set; }
     public bool IsInstalled => _tap != IntPtr.Zero;
 
+    /// <summary>
+    /// Number of continuation hints on screen (0 = none). While hints are shown, Option+1…N picks one (the key is
+    /// swallowed); any other key press dismisses them and goes through to the app as usual.
+    /// </summary>
+    public int HintCount { get; set; }
+
+    /// <summary>Option+digit picked a hint (0-based index); <see cref="HintCount"/> is reset already.</summary>
+    public event Action<int>? HintChosen;
+
+    /// <summary>Another key was pressed while hints were shown; <see cref="HintCount"/> is reset already.</summary>
+    public event Action? HintsDismissed;
+
     public event Action? HotkeyDown;
     public event Action? HotkeyUp;
 
@@ -259,6 +271,8 @@ internal sealed unsafe class HotkeyTap : IDisposable
             return evt;
         if (_recordDone != null)
             return Record(type, evt);
+        if (HintCount > 0 && type == kCGEventKeyDown && HandleHintKey(evt))
+            return IntPtr.Zero;
         if (_keys.Length == 0)
             return evt;
 
@@ -310,6 +324,28 @@ internal sealed unsafe class HotkeyTap : IDisposable
         }
 
         return evt;
+    }
+
+    // Digit keys 1…5 by position (kVK_ANSI_1…5), so they work with any layout
+    private static readonly ushort[] HintKeys = [18, 19, 20, 21, 23];
+
+    /// <summary>True if the key picked a hint and must be swallowed; any other key dismisses the hints.</summary>
+    private bool HandleHintKey(IntPtr evt)
+    {
+        var code = (ushort)CGEventGetIntegerValueField(evt, kCGKeyboardEventKeycode);
+        var flags = CGEventGetFlags(evt);
+        const ulong others = kCGEventFlagMaskShift | kCGEventFlagMaskControl | kCGEventFlagMaskCommand;
+        var index = Array.IndexOf(HintKeys, code);
+        var pick = (flags & kCGEventFlagMaskAlternate) != 0 && (flags & others) == 0 && index >= 0 && index < HintCount;
+
+        HintCount = 0;
+        if (pick)
+        {
+            _context.Post(_ => HintChosen?.Invoke(index), null);
+            return true;
+        }
+        _context.Post(_ => HintsDismissed?.Invoke(), null);
+        return false;
     }
 
     private IntPtr Record(uint type, IntPtr evt)

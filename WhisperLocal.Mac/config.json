@@ -130,6 +130,27 @@
       "Xcode": "The text goes into a code editor: keep code identifiers, file names and shell commands verbatim."
     }
   },
+  // Continuation hints: after a dictation, a local language model (bundled llama-server, Metal) suggests a few ways
+  // to continue the text; Option+1…N or a click inserts one. Turn on and download the model in the main window.
+  "Suggest": {
+    "Enabled": false,
+    // Relative to the app (built by scripts/build-mac.sh)
+    "ServerExe": "llama/llama-server",
+    // Relative to ~/Library/Application Support/WhisperLocal; any instruction-tuned GGUF model works
+    "ModelPath": "models/gemma-3-4b-it-Q4_K_M.gguf",
+    "Host": "127.0.0.1",
+    "Port": 8179,
+    "ExtraArgs": "-c 4096 -ngl 99 --no-webui --reasoning off",
+    "Count": 3,
+    "MaxWords": 15,
+    // Earlier dictations into the same app within this many minutes are what the hints continue
+    "ContextMinutes": 10,
+    "ContextChars": 1500,
+    "DisplaySeconds": 12,
+    "Temperature": 0.8,
+    "TimeoutMs": 8000,
+    "StartupTimeoutSec": 60
+  },
   "Insert": {
     "AppendTrailingSpace": true,
     "RestoreClipboard": true,

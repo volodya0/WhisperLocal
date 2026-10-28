@@ -6,13 +6,14 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using WhisperLocal.Config;
+using WhisperLocal.Llm;
 using WhisperLocal.Pipeline;
 
 namespace WhisperLocal.Ui;
 
 /// <summary>
-/// The app's window: status header, setup checklist, hotkey selector, model memory, statistics, recent dictations
-/// and files. Dark, card-based. Closing only hides it; it refreshes itself while visible.
+/// The app's window: status header, setup checklist, hotkey selector, model memory, continuation hints, statistics,
+/// recent dictations and files. Dark, card-based. Closing only hides it; it refreshes itself while visible.
 /// </summary>
 public sealed class MainWindow : Window
 {
@@ -33,6 +34,15 @@ public sealed class MainWindow : Window
     private readonly TextBlock _memory = DarkTheme.Label("");
     private readonly TextBlock _memoryDetail = DarkTheme.MutedLabel("");
     private readonly Button _memoryButton;
+    private readonly CheckBox _hintsEnabled = new()
+    {
+        Content = "Suggest how to continue after each dictation",
+        FontSize = 13,
+        Foreground = DarkTheme.Text,
+    };
+    private readonly ComboBox _hintModels = DarkTheme.Dropdown(260);
+    private readonly TextBlock _hintHint = DarkTheme.MutedLabel("");
+    private readonly StackPanel _hintStatus = new() { Spacing = 4 };
     private readonly Grid _statTiles = new() { ColumnDefinitions = new ColumnDefinitions("*,*,*,*") };
     private readonly TextBlock _statsNote = DarkTheme.MutedLabel("");
     private readonly StackPanel _history = new();
@@ -45,6 +55,10 @@ public sealed class MainWindow : Window
     private bool _updatingLanguages;
     private List<(string Title, string Value)> _languageChoices = [];
     private string? _shownSetup;
+    private string? _shownHintStatus;
+    private string? _shownHintModel;
+    private bool _updatingHints;
+    private List<string> _hintModelPaths = [];
     private bool _updatingHotkeys;
     private bool _recording;
     private bool _historyDirty = true;
@@ -80,6 +94,7 @@ public sealed class MainWindow : Window
                     DarkTheme.Section("Hotkey", HotkeySection()),
                     DarkTheme.Section("Language", new StackPanel { Spacing = 6, Children = { _languages, _languageHint } }),
                     DarkTheme.Section("Speech model", MemorySection()),
+                    DarkTheme.Section("Continuation hints", HintsSection()),
                     DarkTheme.Section("Statistics", StatsSection(),
                         DarkTheme.Segmented(["Today", "7 days", "All time"], _statsPeriod, i =>
                         {
@@ -94,6 +109,8 @@ public sealed class MainWindow : Window
 
         _hotkeys.SelectionChanged += (_, _) => OnHotkeySelected();
         _languages.SelectionChanged += (_, _) => OnLanguageSelected();
+        _hintsEnabled.IsCheckedChanged += (_, _) => OnHintsToggled();
+        _hintModels.SelectionChanged += (_, _) => OnHintModelSelected();
         _refresh.Tick += (_, _) => Refresh();
         _host.History.Changed += () => Dispatcher.UIThread.Post(() =>
         {
@@ -147,6 +164,7 @@ public sealed class MainWindow : Window
         RefreshHotkey();
         RefreshLanguage();
         RefreshMemory();
+        RefreshHints();
         if (_historyDirty)
             RefreshHistory();
     }
@@ -204,13 +222,19 @@ public sealed class MainWindow : Window
             _ => (DarkTheme.Warning, $"{problems} things need attention"),
         };
 
+        RenderItems(_setup, items, ref _shownSetup);
+    }
+
+    /// <summary>Status rows with a dot and an optional fix-it button; rebuilt only when they change.</summary>
+    private void RenderItems(StackPanel panel, IReadOnlyList<SetupItem> items, ref string? shown)
+    {
         // Rebuild only on change: replacing a button under the mouse would swallow the click
         var signature = string.Join("\n", items.Select(i => $"{i.State}|{i.Text}|{i.ActionLabel}"));
-        if (signature == _shownSetup)
+        if (signature == shown)
             return;
-        _shownSetup = signature;
+        shown = signature;
 
-        _setup.Children.Clear();
+        panel.Children.Clear();
         foreach (var item in items)
         {
             var row = new Grid { ColumnDefinitions = new ColumnDefinitions("20,*,Auto"), MinHeight = 26 };
@@ -231,13 +255,14 @@ public sealed class MainWindow : Window
                 {
                     action();
                     _shownSetup = null;
+                    _shownHintStatus = null;
                     Refresh();
                 }, accent: item.State == SetupState.Error, small: true);
                 button.Margin = new Thickness(12, 0, 0, 0);
                 Grid.SetColumn(button, 2);
                 row.Children.Add(button);
             }
-            _setup.Children.Add(row);
+            panel.Children.Add(row);
         }
     }
 
@@ -441,6 +466,102 @@ public sealed class MainWindow : Window
             _memoryButton.IsEnabled = true;
             RefreshMemory();
         }
+    }
+
+    // ---- Continuation hints ----
+
+    private Control HintsSection()
+    {
+        var model = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Children = { DarkTheme.Label("Model"), _hintModels },
+        };
+        return new StackPanel
+        {
+            Spacing = 6,
+            Children =
+            {
+                _hintsEnabled,
+                DarkTheme.MutedLabel("A local language model offers a few ways to continue what you just dictated. " +
+                                     "Option+1, 2, 3 or a click inserts one; any other key hides them."),
+                model,
+                _hintHint,
+                _hintStatus,
+            },
+        };
+    }
+
+    private void RefreshHints()
+    {
+        var c = _host.Config.Current.Suggest;
+        _updatingHints = true;
+        _hintsEnabled.IsChecked = c.Enabled;
+        if (c.ModelPath != _shownHintModel)
+        {
+            _shownHintModel = c.ModelPath;
+            var titles = LlmModels.Catalog.Select(m => $"{m.Title} · {m.Size}").ToList();
+            _hintModelPaths = LlmModels.Catalog.Select(m => "models/" + m.File).ToList();
+            var index = LlmModels.Find(c.ModelPath) is { } known ? LlmModels.Catalog.ToList().IndexOf(known) : -1;
+            if (index < 0)
+            {
+                titles.Add($"Custom: {System.IO.Path.GetFileName(c.ModelPath)}");
+                _hintModelPaths.Add(c.ModelPath);
+                index = titles.Count - 1;
+            }
+            _hintModels.ItemsSource = titles;
+            _hintModels.SelectedIndex = index;
+            SetHintHint(LlmModels.Find(c.ModelPath)?.Hint ?? "Set in the config (Suggest.ModelPath): any instruction-tuned GGUF model.");
+        }
+        _updatingHints = false;
+
+        _hintModels.IsEnabled = c.Enabled;
+        _hintStatus.IsVisible = c.Enabled;
+        if (c.Enabled)
+            RenderItems(_hintStatus, _host.GetSuggestionItems(), ref _shownHintStatus);
+    }
+
+    private void OnHintsToggled()
+    {
+        if (_updatingHints)
+            return;
+        var enabled = _hintsEnabled.IsChecked == true;
+        try
+        {
+            ConfigEditor.SetValue(_host.Config.FilePath, "Suggest", "Enabled", enabled);
+            SetHintHint(enabled
+                ? "Saved. Download the model below if it is not there yet; hints appear after your next dictation."
+                : "Saved. Hints are off; the language model is unloaded.", DarkTheme.Ok);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Saving Suggest.Enabled failed", ex);
+            SetHintHint($"Could not save: {ex.Message}", DarkTheme.Error);
+        }
+    }
+
+    private void OnHintModelSelected()
+    {
+        var i = _hintModels.SelectedIndex;
+        if (_updatingHints || i < 0 || i >= _hintModelPaths.Count)
+            return;
+        try
+        {
+            ConfigEditor.SetValue(_host.Config.FilePath, "Suggest", "ModelPath", _hintModelPaths[i]);
+            SetHintHint(LlmModels.Find(_hintModelPaths[i])?.Hint ?? "Saved.");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Saving Suggest.ModelPath failed", ex);
+            SetHintHint($"Could not save the model: {ex.Message}", DarkTheme.Error);
+        }
+    }
+
+    private void SetHintHint(string text, IBrush? brush = null)
+    {
+        _hintHint.Text = text;
+        _hintHint.Foreground = brush ?? DarkTheme.Muted;
     }
 
     // ---- Statistics ----

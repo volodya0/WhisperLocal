@@ -34,6 +34,7 @@ public sealed class AppConfig
     ];
 
     public LlmConfig Llm { get; set; } = new();
+    public SuggestConfig Suggest { get; set; } = new();
     public InsertConfig Insert { get; set; } = new();
     public UiConfig Ui { get; set; } = new();
     public LoggingConfig Logging { get; set; } = new();
@@ -191,6 +192,52 @@ public sealed class LlmConfig
 }
 
 public sealed record FewShotExample(string Input, string Output);
+
+/// <summary>
+/// Continuation hints: after a dictation, a local LLM (bundled llama-server) suggests a few ways to continue the text;
+/// Option+1…N (Alt on Windows) inserts one. The model is a GGUF file downloaded from the main window.
+/// </summary>
+public sealed class SuggestConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>Relative to the executable's directory, like Whisper.ServerExe.</summary>
+    public string ServerExe { get; set; } = OperatingSystem.IsWindows() ? @"llama\llama-server.exe" : "llama/llama-server";
+
+    /// <summary>GGUF model, relative to the data directory; the main window offers the models of <c>LlmModels.Catalog</c>.</summary>
+    public string ModelPath { get; set; } = "models/gemma-3-4b-it-Q4_K_M.gguf";
+
+    public string Host { get; set; } = "127.0.0.1";
+    public int Port { get; set; } = 8179;
+
+    /// <summary>-c context size, -ngl layers on the GPU (Metal), no web UI, no thinking (it only adds delay).</summary>
+    public string ExtraArgs { get; set; } = "-c 4096 -ngl 99 --no-webui --reasoning off";
+
+    /// <summary>Number of hints (1–5).</summary>
+    public int Count { get; set; } = 3;
+
+    /// <summary>Upper bound of words per hint.</summary>
+    public int MaxWords { get; set; } = 15;
+
+    /// <summary>Earlier dictations into the same app within this many minutes are the context the hints continue.</summary>
+    public int ContextMinutes { get; set; } = 10;
+
+    /// <summary>Characters of context sent to the model (the end of it).</summary>
+    public int ContextChars { get; set; } = 1500;
+
+    /// <summary>How long the hints stay (longer while the mouse is over them); any key press hides them sooner.</summary>
+    public double DisplaySeconds { get; set; } = 12;
+
+    /// <summary>Higher values give more varied hints.</summary>
+    public double Temperature { get; set; } = 0.8;
+
+    /// <summary>Timeout for one request once the model is loaded; hints that arrive later are dropped.</summary>
+    public int TimeoutMs { get; set; } = 8000;
+
+    public int StartupTimeoutSec { get; set; } = 60;
+
+    public string SystemPrompt { get; set; } = DefaultPrompts.Suggest;
+}
 
 public sealed class InsertConfig
 {
