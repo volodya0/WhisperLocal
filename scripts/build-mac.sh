@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds WhisperLocal.app for macOS:
 #   1. whisper.cpp's whisper-server with Metal (once; cached in WhisperLocal.Mac/Runtime/whisper, not in git)
-#      and llama.cpp's llama-server for the live hints (cached in WhisperLocal.Mac/Runtime/llama)
+#      and llama.cpp's llama-server for autocomplete and the grammar check (cached in WhisperLocal.Mac/Runtime/llama)
 #   2. the .NET app, self-contained, for this Mac's architecture
 #   3. the .app bundle, signed ad hoc (or with $CODESIGN_IDENTITY)
 #
@@ -75,7 +75,7 @@ else
     echo "==> Using cached whisper-server ($(cat "$RUNTIME/VERSION" 2>/dev/null || echo unknown version)); --rebuild-whisper to rebuild"
 fi
 
-# 1b. llama-server for the live hints (Metal; static; no HTTPS/curl: models are downloaded by the app)
+# 1b. llama-server for autocomplete and the grammar check (Metal; static; no HTTPS/curl: models are downloaded by the app)
 if [[ $REBUILD_LLAMA == 1 || ! -x "$LLAMA_RUNTIME/llama-server" || "$(cat "$LLAMA_RUNTIME/VERSION" 2>/dev/null)" != "$LLAMA_CPP_TAG" ]]; then
     need git "Install the Xcode Command Line Tools: xcode-select --install"
     need cmake "Install CMake: brew install cmake"

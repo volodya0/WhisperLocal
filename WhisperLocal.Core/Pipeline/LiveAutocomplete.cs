@@ -7,52 +7,55 @@ using WhisperLocal.Text;
 
 namespace WhisperLocal.Pipeline;
 
+/// <summary>A continuation for the live transcript: its last words and the words that would follow them.</summary>
+public sealed record Completion(string Tail, string Continuation);
+
 /// <summary>
-/// Live hints while the hotkey is held: transcribes the audio recorded so far whenever new speech came in (about
-/// every Suggest.RefreshMs, or at once on a pause) and asks the LLM how it could go on.
+/// Autocomplete while the hotkey is held: transcribes the audio recorded so far whenever new speech came in (about
+/// every Autocomplete.RefreshMs, or at once on a pause) and asks the LLM how the sentence continues.
 /// </summary>
-public sealed class LiveHinter
+public sealed class LiveAutocomplete
 {
     private const int TickMs = 150;
 
-    // whisper-server takes at most 30 s; the end of a long dictation is what the hints continue anyway
+    // whisper-server takes at most 30 s; the end of a long dictation is what autocomplete continues anyway
     private const int WindowMs = 25_000;
 
     private readonly ConfigManager _config;
     private readonly ISpeechToText _stt;
-    private readonly Suggester _suggester;
+    private readonly Autocompleter _autocompleter;
     private readonly TextFilters _filters = new();
 
-    public LiveHinter(ConfigManager config, ISpeechToText stt, Suggester suggester)
+    public LiveAutocomplete(ConfigManager config, ISpeechToText stt, Autocompleter autocompleter)
     {
         _config = config;
         _stt = stt;
-        _suggester = suggester;
+        _autocompleter = autocompleter;
     }
 
     /// <summary>
-    /// Runs until <paramref name="ct"/> is cancelled (the hotkey is released). <paramref name="show"/> gets the hints
-    /// and whether the speaker is pausing, or null to hide them; it is called on the caller's context.
+    /// Runs until <paramref name="ct"/> is cancelled (the hotkey is released). <paramref name="show"/> gets the completion
+    /// and whether the speaker is pausing, or null to hide it; it is called on the caller's context.
     /// </summary>
     /// <param name="recorded">The 16 kHz mono PCM recorded so far.</param>
-    public async Task RunAsync(Func<byte[]> recorded, string? app, Action<LiveHints?, bool> show, CancellationToken ct)
+    public async Task RunAsync(Func<byte[]> recorded, string? app, Action<Completion?, bool> show, CancellationToken ct)
     {
         var transcribedUpToMs = 0.0;
         var lastStt = Stopwatch.StartNew();
         var transcript = "";
-        LiveHints? hints = null;
+        Completion? completion = null;
         bool? shown = null; // null: hidden; false: dim (speaking); true: highlighted (pausing)
         var warned = false;
 
-        // "On pause": only while pausing; "Always": dim while speaking, highlighted on a pause
+        // "When I pause": only while pausing; "Always": dim while speaking, highlighted on a pause
         void Display(bool paused, bool fresh)
         {
-            bool? wanted = hints == null || (hints.Next.Count == 0 && hints.Correction.Length == 0)
-                           || (_config.Current.Suggest.OnPauseOnly && !paused) ? null : paused;
+            bool? wanted = completion == null || completion.Continuation.Length == 0
+                           || (_config.Current.Autocomplete.OnPauseOnly && !paused) ? null : paused;
             if (wanted == shown && !fresh)
                 return;
             shown = wanted;
-            show(wanted == null ? null : hints, wanted == true);
+            show(wanted == null ? null : completion, wanted == true);
         }
 
         try
@@ -61,7 +64,7 @@ public sealed class LiveHinter
             {
                 await Task.Delay(TickMs, ct);
                 var cfg = _config.Current;
-                var c = cfg.Suggest;
+                var c = cfg.Autocomplete;
 
                 var pcm = recorded();
                 var durationMs = AudioConvert.DurationMs(pcm);
@@ -75,8 +78,8 @@ public sealed class LiveHinter
                 var speechEndMs = durationMs - silenceMs;
                 var newSpeech = speechEndMs > transcribedUpToMs + 100;
 
-                // A pause highlights the current hints at once, and the refresh below follows; "On pause" waits for
-                // the refresh instead when there is new speech, since its last hints belong to an earlier pause
+                // A pause highlights the current completion at once, and the refresh below follows; "When I pause" waits
+                // for the refresh when there is new speech, since its last completion belongs to an earlier pause
                 if (!(paused && newSpeech && c.OnPauseOnly))
                     Display(paused, fresh: false);
 
@@ -90,15 +93,16 @@ public sealed class LiveHinter
                         if (text.Length > 0 && text != transcript)
                         {
                             transcript = text;
-                            hints = await _suggester.SuggestAsync(app, transcript, ct);
+                            var continuation = await _autocompleter.CompleteAsync(app, transcript, ct);
+                            completion = new Completion(Autocompleter.Tail(transcript, 6), continuation);
                             Display(paused, fresh: true);
                         }
                     }
                     catch (Exception ex) when (!ct.IsCancellationRequested)
                     {
-                        // A slow or failed round only skips these hints; the next new speech tries again
+                        // A slow or failed round only skips this completion; the next new speech tries again
                         if (!warned)
-                            Log.Warn($"Live hints failed: {(ex is OperationCanceledException ? "timed out" : ex.Message)}");
+                            Log.Warn($"Autocomplete failed: {(ex is OperationCanceledException ? "timed out" : ex.Message)}");
                         warned = true;
                     }
                 }

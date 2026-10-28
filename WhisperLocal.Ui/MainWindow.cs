@@ -13,7 +13,7 @@ using WhisperLocal.Stt;
 namespace WhisperLocal.Ui;
 
 /// <summary>
-/// The app's window: status header, setup checklist, hotkey selector, model memory, live hints, statistics,
+/// The app's window: status header, setup checklist, hotkey selector, model memory, language model, statistics,
 /// recent dictations and files. Dark, card-based. Closing only hides it; it refreshes itself while visible.
 /// </summary>
 public sealed class MainWindow : Window
@@ -37,9 +37,9 @@ public sealed class MainWindow : Window
     private readonly ComboBox _speechModels = DarkTheme.Dropdown(250);
     private readonly Note _speechNote = new();
     private readonly ComboBox _hintModes = DarkTheme.Dropdown(150);
-    private readonly CheckBox _corrections = new()
+    private readonly CheckBox _polish = new()
     {
-        Content = "Point out mistakes when I speak English",
+        Content = "Grammar check: after each dictation, propose a polished version",
         FontSize = 13,
         Foreground = DarkTheme.Text,
     };
@@ -63,7 +63,7 @@ public sealed class MainWindow : Window
     private string? _shownSpeechModel;
     private List<string> _speechModelPaths = [];
     private string? _shownHintMode;
-    private bool? _shownCorrections;
+    private bool? _shownPolish;
     private bool _updatingHints;
     private bool _updatingSpeechModels;
     private List<string> _hintModelPaths = [];
@@ -102,7 +102,7 @@ public sealed class MainWindow : Window
                     DarkTheme.Section("Setup", _setup),
                     DarkTheme.Section("", HotkeyAndLanguageSection()),
                     DarkTheme.Section("Speech model", MemorySection()),
-                    DarkTheme.Section("Live hints", HintsSection()),
+                    DarkTheme.Section("Language model", LanguageModelSection()),
                     DarkTheme.Section("Statistics", StatsSection(),
                         DarkTheme.Segmented(["Today", "7 days", "All time"], _statsPeriod, i =>
                         {
@@ -119,7 +119,7 @@ public sealed class MainWindow : Window
         _languages.SelectionChanged += (_, _) => OnLanguageSelected();
         _hintModes.SelectionChanged += (_, _) => OnHintModeSelected();
         _speechModels.SelectionChanged += (_, _) => OnSpeechModelSelected();
-        _corrections.IsCheckedChanged += (_, _) => OnCorrectionsToggled();
+        _polish.IsCheckedChanged += (_, _) => OnPolishToggled();
         _hintModels.SelectionChanged += (_, _) => OnHintModelSelected();
         _refresh.Tick += (_, _) => Refresh();
 
@@ -580,29 +580,31 @@ public sealed class MainWindow : Window
         }
     }
 
-    // ---- Live hints ----
+    // ---- Language model: autocomplete and grammar check ----
 
     private static readonly (string Title, string Value, string Hint)[] HintModes =
     [
-        ("Off", "Off", "No hints."),
+        ("Off", "Off", "No autocomplete."),
         ("Always", "Always",
-            "While you speak, the next words in your language refresh about every second, dim; they light up when you pause."),
-        ("When I pause", "Pause", "Nothing while you speak fluently; the next words appear after a short pause."),
+            "While you speak, the continuation refreshes about every second, dim; it lights up when you pause."),
+        ("When I pause", "Pause", "Nothing while you speak fluently; the continuation appears after a short pause."),
     ];
 
-    private const string HintsDescription =
-        "While you hold the hotkey, a local language model shows how your sentence could go on, in the language you speak. " +
-        "Just say the word you need.";
+    private const string AutocompleteDescription =
+        "Like code autocomplete: while you hold the hotkey, a local language model shows how your sentence continues, " +
+        "in grey after your last words. Just say it, or ignore it and go on.";
 
-    private Control HintsSection() => new StackPanel
+    private Control LanguageModelSection() => new StackPanel
     {
         Spacing = 4,
-        Children = { Fields(("Mode", _hintModes), ("Model", _hintModels)), _corrections, _hintNote.Line, _hintStatus },
+        Children = { Fields(("Autocomplete", _hintModes), ("Model", _hintModels)), _polish, _hintNote.Line, _hintStatus },
     };
 
     private void RefreshHints()
     {
-        var c = _host.Config.Current.Suggest;
+        var cfg = _host.Config.Current;
+        var c = cfg.Autocomplete;
+        var model = cfg.LocalLlm.ModelPath;
         _updatingHints = true;
         // Only on a change in the config: a click shows at once, the config catches up after the save
         if (c.Mode != _shownHintMode)
@@ -611,36 +613,36 @@ public sealed class MainWindow : Window
             var index = Array.FindIndex(HintModes, m => string.Equals(m.Value, c.Mode, StringComparison.OrdinalIgnoreCase));
             _hintModes.ItemsSource = HintModes.Select(m => m.Title).ToList();
             _hintModes.SelectedIndex = Math.Max(0, index);
-            ToolTip.SetTip(_hintModes, $"{HintsDescription}\n\n{HintModes[Math.Max(0, index)].Hint}");
+            ToolTip.SetTip(_hintModes, $"{AutocompleteDescription}\n\n{HintModes[Math.Max(0, index)].Hint}");
         }
-        if (c.Corrections != _shownCorrections)
+        if (cfg.Polish.Enabled != _shownPolish)
         {
-            _shownCorrections = c.Corrections;
-            _corrections.IsChecked = c.Corrections;
+            _shownPolish = cfg.Polish.Enabled;
+            _polish.IsChecked = cfg.Polish.Enabled;
         }
-        if (c.ModelPath != _shownHintModel)
+        if (model != _shownHintModel)
         {
-            _shownHintModel = c.ModelPath;
+            _shownHintModel = model;
             var titles = LlmModels.Catalog.Select(m => $"{m.Title} · {m.Size}").ToList();
             _hintModelPaths = LlmModels.Catalog.Select(m => "models/" + m.File).ToList();
-            var index = LlmModels.Find(c.ModelPath) is { } known ? LlmModels.Catalog.ToList().IndexOf(known) : -1;
+            var index = LlmModels.Find(model) is { } known ? LlmModels.Catalog.ToList().IndexOf(known) : -1;
             if (index < 0)
             {
-                titles.Add($"Custom: {System.IO.Path.GetFileName(c.ModelPath)}");
-                _hintModelPaths.Add(c.ModelPath);
+                titles.Add($"Custom: {System.IO.Path.GetFileName(model)}");
+                _hintModelPaths.Add(model);
                 index = titles.Count - 1;
             }
             _hintModels.ItemsSource = titles;
             _hintModels.SelectedIndex = index;
-            ToolTip.SetTip(_hintModels, LlmModels.Find(c.ModelPath)?.Hint ?? "Set in the config (Suggest.ModelPath): any instruction-tuned GGUF model.");
+            ToolTip.SetTip(_hintModels, LlmModels.Find(model)?.Hint ?? "Set in the config (LocalLlm.ModelPath): any instruction-tuned GGUF model.");
         }
         _updatingHints = false;
 
-        _corrections.IsVisible = c.IsOn;
-        _hintModels.IsEnabled = c.IsOn;
-        _hintStatus.IsVisible = c.IsOn;
-        if (c.IsOn)
-            RenderItems(_hintStatus, _host.GetSuggestionItems(), ref _shownHintStatus);
+        var used = c.IsOn || cfg.Polish.Enabled;
+        _hintModels.IsEnabled = used;
+        _hintStatus.IsVisible = used;
+        if (used)
+            RenderItems(_hintStatus, _host.GetLanguageModelItems(), ref _shownHintStatus);
     }
 
     private void OnHintModeSelected()
@@ -650,27 +652,31 @@ public sealed class MainWindow : Window
             return;
         try
         {
-            ConfigEditor.SetValue(_host.Config.FilePath, "Suggest", "Mode", HintModes[i].Value);
-            _hintNote.Set(i == 0 ? "Saved. Hints are off; the language model is unloaded." : $"Saved. {HintModes[i].Hint}", DarkTheme.Ok);
+            ConfigEditor.SetValue(_host.Config.FilePath, "Autocomplete", "Mode", HintModes[i].Value);
+            _hintNote.Set(i == 0 ? "Saved. Autocomplete is off." : $"Saved. {HintModes[i].Hint}", DarkTheme.Ok);
         }
         catch (Exception ex)
         {
-            Log.Error("Saving Suggest.Mode failed", ex);
+            Log.Error("Saving Autocomplete.Mode failed", ex);
             _hintNote.Set($"Could not save: {ex.Message}", DarkTheme.Error);
         }
     }
 
-    private void OnCorrectionsToggled()
+    private void OnPolishToggled()
     {
         if (_updatingHints)
             return;
+        var enabled = _polish.IsChecked == true;
         try
         {
-            ConfigEditor.SetValue(_host.Config.FilePath, "Suggest", "Corrections", _corrections.IsChecked == true);
+            ConfigEditor.SetValue(_host.Config.FilePath, "Polish", "Enabled", enabled);
+            _hintNote.Set(enabled
+                ? "Saved. After a dictation, a panel proposes the polished text: insert it or copy it."
+                : "Saved. Grammar check is off.", DarkTheme.Ok);
         }
         catch (Exception ex)
         {
-            Log.Error("Saving Suggest.Corrections failed", ex);
+            Log.Error("Saving Polish.Enabled failed", ex);
             _hintNote.Set($"Could not save: {ex.Message}", DarkTheme.Error);
         }
     }
@@ -682,12 +688,12 @@ public sealed class MainWindow : Window
             return;
         try
         {
-            ConfigEditor.SetValue(_host.Config.FilePath, "Suggest", "ModelPath", _hintModelPaths[i]);
+            ConfigEditor.SetValue(_host.Config.FilePath, "LocalLlm", "ModelPath", _hintModelPaths[i]);
             _hintNote.Set("Saved." + (LlmModels.Find(_hintModelPaths[i]) is { } model ? $" {model.Hint}" : ""), DarkTheme.Ok);
         }
         catch (Exception ex)
         {
-            Log.Error("Saving Suggest.ModelPath failed", ex);
+            Log.Error("Saving LocalLlm.ModelPath failed", ex);
             _hintNote.Set($"Could not save the model: {ex.Message}", DarkTheme.Error);
         }
     }

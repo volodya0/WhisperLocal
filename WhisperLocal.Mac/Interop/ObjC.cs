@@ -17,6 +17,13 @@ internal struct NSSize(double width, double height)
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct NSRange(long location, long length)
+{
+    public nuint Location = (nuint)location;
+    public nuint Length = (nuint)length;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct NSRect(double x, double y, double width, double height)
 {
     public double X = x;
@@ -74,7 +81,9 @@ internal static class ObjC
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern long SendLong(IntPtr receiver, IntPtr selector);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern long SendLong(IntPtr receiver, IntPtr selector, IntPtr a);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern int SendInt(IntPtr receiver, IntPtr selector);
+    [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern IntPtr Send(IntPtr receiver, IntPtr selector, IntPtr a, IntPtr b, NSRange c);
     [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern NSPoint SendPoint(IntPtr receiver, IntPtr selector);
+    [DllImport(Lib, EntryPoint = "objc_msgSend")] public static extern NSSize SendSize(IntPtr receiver, IntPtr selector, NSSize a);
 
     // 32-byte structs are returned in registers on arm64 but through a hidden pointer on x86_64
     [DllImport(Lib, EntryPoint = "objc_msgSend")] private static extern NSRect SendRectArm64(IntPtr receiver, IntPtr selector);

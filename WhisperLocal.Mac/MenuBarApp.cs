@@ -45,11 +45,13 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private readonly OllamaCleaner _llm;
     private readonly DictationPipeline _pipeline;
     private readonly LlamaServer _llama;
-    private readonly Suggester _suggester;
-    private readonly LiveHinter _hinter;
+    private readonly Autocompleter _autocompleter;
+    private readonly LiveAutocomplete _liveAutocomplete;
+    private readonly Polisher _polisher;
     private readonly MacTextInserter _inserter = new();
     private readonly RecordingOverlay _overlay;
-    private readonly SuggestionPanel _hints;
+    private readonly AutocompletePanel _completionPanel;
+    private readonly PolishPanel _polishPanel;
     private readonly TranscriptWindow _transcriptWindow = new();
     private readonly MainWindow _mainWindow;
     private readonly System.Threading.Timer _idleTimer;
@@ -63,7 +65,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private bool _checkingForUpdates;
     private Download? _download;
     private Download? _llmDownload;
-    private CancellationTokenSource? _liveHints;
+    private CancellationTokenSource? _liveCompletion;
+    private CancellationTokenSource? _polishRequest;
+    private (string Original, string Polished, FrontmostApp? Target, long PastedAt)? _proposal;
     private bool _disposed;
 
     /// <summary>A model download in progress: what the setup line shows, and how to cancel it.</summary>
@@ -85,10 +89,12 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _llm = new OllamaCleaner(config);
         _pipeline = new DictationPipeline(config, _stt, _llm);
         _llama = new LlamaServer(config);
-        _suggester = new Suggester(config, _llama);
-        _hinter = new LiveHinter(config, _stt, _suggester);
+        _autocompleter = new Autocompleter(config, _llama);
+        _liveAutocomplete = new LiveAutocomplete(config, _stt, _autocompleter);
+        _polisher = new Polisher(config, _llama);
         _overlay = new RecordingOverlay(_ui, ShowLastTranscript);
-        _hints = new SuggestionPanel();
+        _completionPanel = new AutocompletePanel();
+        _polishPanel = new PolishPanel(_ui, () => _ = InsertProposalAsync(), CopyProposal);
         _mainWindow = new MainWindow(this, _transcriptWindow);
 
         _menu = new StatusMenu();
@@ -204,9 +210,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         return items;
     }
 
-    public IReadOnlyList<SetupItem> GetSuggestionItems()
+    public IReadOnlyList<SetupItem> GetLanguageModelItems()
     {
-        var c = _config.Current.Suggest;
+        var c = _config.Current.LocalLlm;
         var items = new List<SetupItem>();
 
         var server = LlamaServer.ResolveServerExe(c);
@@ -333,12 +339,12 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         }
         _hotkey.SuppressKey = cfg.Hotkey.SuppressKey;
 
-        if (!cfg.Suggest.IsOn)
-        {
-            StopLiveHints();
-            if (_llama.IsLoaded)
-                _llama.Unload();
-        }
+        if (!cfg.Autocomplete.IsOn)
+            StopAutocomplete();
+        if (!cfg.Polish.Enabled)
+            DismissProposal();
+        if (!IsLanguageModelWanted && _llama.IsLoaded)
+            _llama.Unload();
 
         try
         {
@@ -357,7 +363,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (_state != State.Recording)
             return;
         Log.Info("Recording cancelled: another key was pressed while holding the hotkey");
-        StopLiveHints();
+        StopAutocomplete();
         await _recorder.StopAsync();
         _overlay.Hide();
         SetState(State.Idle);
@@ -397,7 +403,10 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (cfg.Ui.ShowOverlay)
             _overlay.ShowRecording(_pressedAt);
         _ = _pipeline.PrepareAsync();
-        StartLiveHints();
+        DismissProposal();
+        if (IsLanguageModelReady)
+            _ = PreloadLanguageModelAsync();
+        StartAutocomplete();
     }
 
     private void OnHotkeyUp() => _ = FinishRecordingAsync();
@@ -410,7 +419,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         var cfg = _config.Current;
         var recordSec = Stopwatch.GetElapsedTime(_pressedAt).TotalSeconds;
         var processStart = Stopwatch.GetTimestamp();
-        StopLiveHints();
+        StopAutocomplete();
         SetState(State.Processing);
         if (cfg.Ui.ShowOverlay)
             _overlay.ShowProcessing(processStart);
@@ -432,10 +441,20 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             if (string.IsNullOrWhiteSpace(result.FinalText))
                 return;
 
+            // Nowhere to type (a file list, the desktop): show the text to edit and copy instead of pasting into nothing
+            if (cfg.Insert.ShowWhenNoTextField && FocusedInput.AcceptsText(FrontmostApp.Capture().ProcessId) == false)
+            {
+                Log.Info("No text input is focused: showing the transcript instead of pasting");
+                _transcriptWindow.ShowText(result.FinalText, "No text field was focused, so nothing was pasted. Edit and copy it here:");
+                return;
+            }
+
             var text = cfg.Insert.AppendTrailingSpace ? result.FinalText + " " : result.FinalText;
             await _inserter.InsertAsync(text, _target, cfg.Insert);
-            if (cfg.Suggest.IsOn)
-                _suggester.Remember(_target?.ProcessName, result.FinalText);
+            if (cfg.Autocomplete.IsOn)
+                _autocompleter.Remember(_target?.ProcessName, result.FinalText);
+            if (cfg.Polish.Enabled && IsLanguageModelReady)
+                _ = ProposePolishedAsync(result.FinalText, _target, Stopwatch.GetTimestamp());
         }
         catch (Exception ex)
         {
@@ -488,46 +507,152 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _history.Add(record);
     }
 
-    // ---- Live hints ----
+    // ---- Language model: autocomplete and grammar check ----
 
-    /// <summary>On hotkey press: loads the model while the user starts speaking and shows hints until release.</summary>
-    private void StartLiveHints()
+    private bool IsLanguageModelWanted => _config.Current.Autocomplete.IsOn || _config.Current.Polish.Enabled;
+
+    /// <summary>A feature is on and llama-server and the model are in place (the server starts on demand).</summary>
+    private bool IsLanguageModelReady
     {
-        StopLiveHints();
-        if (!_suggester.IsAvailable)
-            return;
-        _ = _suggester.PreloadAsync();
-        var live = _liveHints = new CancellationTokenSource();
-        _ = RunLiveHintsAsync(live);
+        get
+        {
+            var c = _config.Current.LocalLlm;
+            return IsLanguageModelWanted && File.Exists(LlamaServer.ResolveServerExe(c)) && File.Exists(LlamaServer.ResolveModel(c));
+        }
     }
 
-    private async Task RunLiveHintsAsync(CancellationTokenSource live)
+    /// <summary>On hotkey press: loads the model while the user speaks.</summary>
+    private async Task PreloadLanguageModelAsync()
     {
         try
         {
-            await _hinter.RunAsync(_recorder.Snapshot, _target?.ProcessName, (hints, pausing) =>
+            await _llama.WarmUpAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"llama-server warm-up failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>On hotkey press: shows the continuation of what is being said until the hotkey is released.</summary>
+    private void StartAutocomplete()
+    {
+        StopAutocomplete();
+        if (!_config.Current.Autocomplete.IsOn || !IsLanguageModelReady)
+            return;
+        var live = _liveCompletion = new CancellationTokenSource();
+        _ = RunAutocompleteAsync(live);
+    }
+
+    private async Task RunAutocompleteAsync(CancellationTokenSource live)
+    {
+        try
+        {
+            await _liveAutocomplete.RunAsync(_recorder.Snapshot, _target?.ProcessName, (completion, pausing) =>
             {
                 if (live.IsCancellationRequested)
                     return;
-                if (hints == null)
-                    _hints.Hide();
+                if (completion == null)
+                    _completionPanel.Hide();
                 else
-                    _hints.Show(hints.Next, hints.Correction, pausing);
+                    _completionPanel.Show(completion.Tail, completion.Continuation, pausing);
             }, live.Token);
         }
         finally
         {
-            if (_liveHints == live)
-                _liveHints = null;
+            if (_liveCompletion == live)
+                _liveCompletion = null;
             live.Dispose();
         }
     }
 
-    private void StopLiveHints()
+    private void StopAutocomplete()
     {
-        _liveHints?.Cancel();
-        _liveHints = null;
-        _hints.Hide();
+        _liveCompletion?.Cancel();
+        _liveCompletion = null;
+        _completionPanel.Hide();
+    }
+
+    /// <summary>After a dictation was pasted: asks for a polished version and proposes it if it differs.</summary>
+    private async Task ProposePolishedAsync(string original, FrontmostApp? target, long pastedAt)
+    {
+        DismissProposal();
+        var request = _polishRequest = new CancellationTokenSource();
+        try
+        {
+            var polished = await _polisher.PolishAsync(original, request.Token);
+            if (polished == null || request.IsCancellationRequested || _state == State.Recording)
+                return;
+            _proposal = (original, polished, target, pastedAt);
+            _polishPanel.Show(TextDiff.Changes(original, polished), TimeSpan.FromSeconds(Math.Max(3, _config.Current.Polish.DisplaySeconds)));
+        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested)
+        {
+            // A new dictation came first
+        }
+        catch (Exception ex)
+        {
+            // The dictation itself succeeded; a notification for a failed check would be noise
+            Log.Warn($"Grammar check failed: {(ex is OperationCanceledException ? "timed out" : ex.Message)}");
+        }
+        finally
+        {
+            if (_polishRequest == request)
+                _polishRequest = null;
+            request.Dispose();
+        }
+    }
+
+    private void DismissProposal()
+    {
+        _polishRequest?.Cancel();
+        _polishRequest = null;
+        _proposal = null;
+        _polishPanel.Hide();
+    }
+
+    /// <summary>
+    /// Insert: replaces the pasted dictation with the polished text (undo + paste). If the user typed since, or switched
+    /// apps, undo would hit something else, so the text is pasted at the cursor instead.
+    /// </summary>
+    private async Task InsertProposalAsync()
+    {
+        if (_proposal is not { } p || _state != State.Idle)
+            return;
+        DismissProposal();
+
+        var cfg = _config.Current;
+        var text = cfg.Insert.AppendTrailingSpace ? p.Polished + " " : p.Polished;
+        var sinceKey = MacNative.CGEventSourceSecondsSinceLastEventType(MacNative.kCGEventSourceStateHIDSystemState, MacNative.kCGEventKeyDown);
+        var typedSince = sinceKey < Stopwatch.GetElapsedTime(p.PastedAt).TotalSeconds;
+        var sameApp = p.Target == null || FrontmostApp.Capture().ProcessId == p.Target.ProcessId;
+        try
+        {
+            if (!typedSince && sameApp)
+            {
+                Log.Info("Grammar check: replacing the dictation with the polished text");
+                await _inserter.ReplaceLastAsync(text, p.Target, cfg.Insert);
+            }
+            else
+            {
+                Log.Info("Grammar check: pasting the polished text at the cursor (typed or switched apps since the dictation)");
+                await _inserter.InsertAsync(text, p.Target, cfg.Insert);
+            }
+            _lastTranscript = p.Polished;
+        }
+        catch (Exception ex)
+        {
+            ReportError("Inserting the polished text failed", ex);
+        }
+    }
+
+    private void CopyProposal()
+    {
+        if (_proposal is not { } p)
+            return;
+        MacTextInserter.Copy(p.Polished);
+        DismissProposal();
+        Dialogs.Notify("Polished text copied");
     }
 
     private void ToggleEnabled()
@@ -554,7 +679,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             SetState(State.Idle);
         }
 
-        StopLiveHints();
+        StopAutocomplete();
+        DismissProposal();
         _stt.Unload();
         _llama.Unload();
         if (_config.Current.Llm.Enabled)
@@ -631,7 +757,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         try
         {
             if (await DownloadAsync(model, url, download))
-                Dialogs.Notify("Language model downloaded: hints appear while you dictate");
+                Dialogs.Notify("Language model downloaded");
         }
         finally
         {
@@ -781,7 +907,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _disposed = true;
         _download?.Cancel.Cancel();
         _llmDownload?.Cancel.Cancel();
-        _liveHints?.Cancel();
+        _liveCompletion?.Cancel();
+        _polishRequest?.Cancel();
         _idleTimer.Dispose();
         _hotkey.Dispose();
         _recorder.Dispose();
@@ -789,7 +916,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _llm.Dispose();
         _llama.Dispose();
         _overlay.Dispose();
-        _hints.Dispose();
+        _completionPanel.Dispose();
+        _polishPanel.Dispose();
         try
         {
             _mainWindow.CloseForGood();

@@ -4,6 +4,7 @@ using Avalonia.Threading;
 using WhisperLocal.Config;
 using WhisperLocal.Mac.Audio;
 using WhisperLocal.Mac.Interop;
+using WhisperLocal.Mac.Output;
 using WhisperLocal.Mac.Ui;
 using WhisperLocal.Ui;
 
@@ -94,6 +95,7 @@ internal static class Program
             "NSApplication", "NSStatusBar", "NSMenu", "NSMenuItem", "NSWindow", "NSPanel", "NSTextField", "NSButton",
             "NSColor", "NSFont", "NSImage", "NSAlert", "NSEvent", "NSScreen", "NSWorkspace", "NSPasteboard",
             "NSPasteboardItem", "NSString", "NSData", "NSDictionary", "NSNumber", "NSMutableArray", "NSObject",
+            "NSMutableAttributedString", "NSAppearance",
         ];
         try
         {
@@ -103,7 +105,9 @@ internal static class Program
             ObjC.Class("AVCaptureDevice");
             _ = MacNative.kCFRunLoopCommonModes;
             _ = MacNative.CGEventSourceFlagsState(MacNative.kCGEventSourceStateHIDSystemState);
+            _ = MacNative.CGEventSourceSecondsSinceLastEventType(MacNative.kCGEventSourceStateHIDSystemState, MacNative.kCGEventKeyDown);
             _ = MacNative.AXIsProcessTrusted();
+            _ = FocusedInput.AcceptsText(1); // the AXUIElement functions resolve (the answer itself does not matter here)
             // Avalonia's native platform and a window of the shared UI
             BuildAvaloniaApp().SetupWithoutStarting();
             _ = new TranscriptWindow();

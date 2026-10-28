@@ -4,7 +4,7 @@ using static WhisperLocal.Mac.Interop.ObjC;
 namespace WhisperLocal.Mac.Ui;
 
 /// <summary>
-/// The floating panels (recording indicator, live hints): non-activating, never take focus, on every desktop and
+/// The floating panels (recording indicator, autocomplete, grammar check): non-activating, never take focus, on every desktop and
 /// over full-screen apps. That last part works only while the app is an accessory (menu bar) app, so the app never
 /// switches to a regular Dock app.
 /// </summary>

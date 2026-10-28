@@ -22,8 +22,8 @@ public interface IAppHost
     /// <summary>Permissions, server, model, hotkey: what has to be in place before dictation works.</summary>
     IReadOnlyList<SetupItem> GetSetupItems();
 
-    /// <summary>Live hints: the language model (Download, Unload) and its server, for the main window's section.</summary>
-    IReadOnlyList<SetupItem> GetSuggestionItems();
+    /// <summary>Autocomplete and grammar check: the language model (Download, Unload) and its server.</summary>
+    IReadOnlyList<SetupItem> GetLanguageModelItems();
 
     IReadOnlyList<HotkeyPreset> HotkeyPresets { get; }
     string DescribeHotkey(string key);

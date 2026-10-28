@@ -34,7 +34,9 @@ public sealed class AppConfig
     ];
 
     public LlmConfig Llm { get; set; } = new();
-    public SuggestConfig Suggest { get; set; } = new();
+    public LocalLlmConfig LocalLlm { get; set; } = new();
+    public AutocompleteConfig Autocomplete { get; set; } = new();
+    public PolishConfig Polish { get; set; } = new();
     public InsertConfig Insert { get; set; } = new();
     public UiConfig Ui { get; set; } = new();
     public LoggingConfig Logging { get; set; } = new();
@@ -194,18 +196,11 @@ public sealed class LlmConfig
 public sealed record FewShotExample(string Input, string Output);
 
 /// <summary>
-/// Live hints while dictating: as you speak, a local LLM (bundled llama-server) suggests the next words in the language
-/// you speak, and for English points out a mistake in the last phrase. The model is a GGUF file downloaded from the
-/// main window.
+/// The bundled llama-server and its GGUF model, shared by autocomplete and the grammar check. The model is downloaded
+/// from the main window; the server starts on demand and unloads with the speech model.
 /// </summary>
-public sealed class SuggestConfig
+public sealed class LocalLlmConfig
 {
-    /// <summary>"Off"; "Always": refreshed about every RefreshMs while speaking, highlighted on a pause; "Pause": only on a pause.</summary>
-    public string Mode { get; set; } = "Off";
-
-    /// <summary>For English speech, show a clear grammar or word-choice mistake in the last phrase ("I am agree → I agree").</summary>
-    public bool Corrections { get; set; } = true;
-
     /// <summary>Relative to the executable's directory, like Whisper.ServerExe.</summary>
     public string ServerExe { get; set; } = OperatingSystem.IsWindows() ? @"llama\llama-server.exe" : "llama/llama-server";
 
@@ -218,36 +213,63 @@ public sealed class SuggestConfig
     /// <summary>-c context size, -ngl layers on the GPU (Metal), no web UI, no thinking (it only adds delay).</summary>
     public string ExtraArgs { get; set; } = "-c 4096 -ngl 99 --no-webui --reasoning off";
 
-    /// <summary>Number of hints (1–5).</summary>
-    public int Count { get; set; } = 3;
+    public int StartupTimeoutSec { get; set; } = 60;
+}
 
-    /// <summary>Upper bound of words per hint.</summary>
-    public int MaxWords { get; set; } = 4;
+/// <summary>
+/// Autocomplete while dictating, like code completion: as you speak, one grey continuation finishes the sentence.
+/// Just say it, or ignore it and go on.
+/// </summary>
+public sealed class AutocompleteConfig
+{
+    /// <summary>"Off"; "Always": refreshed about every RefreshMs while speaking, highlighted on a pause; "Pause": only on a pause.</summary>
+    public string Mode { get; set; } = "Off";
 
-    /// <summary>"Always" mode: how often the live transcript and the hints are refreshed while new speech comes in.</summary>
+    /// <summary>Upper bound of words in the continuation; it also stops at the end of the sentence.</summary>
+    public int MaxWords { get; set; } = 12;
+
+    /// <summary>"Always" mode: how often the live transcript and the continuation are refreshed while new speech comes in.</summary>
     public int RefreshMs { get; set; } = 1000;
 
     /// <summary>Silence after speech that counts as a pause (searching for a word).</summary>
     public int PauseMs { get; set; } = 700;
 
-    /// <summary>Earlier dictations into the same app within this many minutes are context for the hints.</summary>
-    public int ContextMinutes { get; set; } = 10;
+    /// <summary>Earlier dictations into the same app within this many minutes come before the transcript as context.</summary>
+    public int ContextMinutes { get; set; } = 2;
 
-    /// <summary>Characters of earlier context sent to the model (the end of it).</summary>
-    public int ContextChars { get; set; } = 800;
+    /// <summary>Characters of earlier context (the end of it).</summary>
+    public int ContextChars { get; set; } = 600;
 
-    /// <summary>Low values give the most likely words; higher ones more varied hints.</summary>
-    public double Temperature { get; set; } = 0.4;
+    /// <summary>0 always takes the most likely words, like code completion.</summary>
+    public double Temperature { get; set; } = 0.1;
 
-    /// <summary>Timeout for one hint request once the model is loaded; late hints are dropped.</summary>
+    /// <summary>Timeout for one completion once the model is loaded; late ones are dropped.</summary>
     public int TimeoutMs { get; set; } = 3000;
-
-    public int StartupTimeoutSec { get; set; } = 60;
-
-    public string SystemPrompt { get; set; } = DefaultPrompts.LiveHints;
 
     public bool IsOn => !string.Equals(Mode, "Off", StringComparison.OrdinalIgnoreCase);
     public bool OnPauseOnly => string.Equals(Mode, "Pause", StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// Grammar check after a dictation: the local LLM rewrites the text as correct, natural text in the same language and
+/// a panel proposes it, with the changed words highlighted; Insert replaces the pasted text, Copy copies it.
+/// </summary>
+public sealed class PolishConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>Shorter dictations are not checked.</summary>
+    public int MinWords { get; set; } = 3;
+
+    /// <summary>How long the proposal stays (longer while the mouse is over it); the next dictation hides it too.</summary>
+    public double DisplaySeconds { get; set; } = 15;
+
+    public double Temperature { get; set; } = 0.2;
+
+    /// <summary>Timeout once the model is loaded; a late proposal is dropped.</summary>
+    public int TimeoutMs { get; set; } = 15000;
+
+    public string SystemPrompt { get; set; } = DefaultPrompts.Polish;
 }
 
 public sealed class InsertConfig
@@ -255,6 +277,9 @@ public sealed class InsertConfig
     public bool AppendTrailingSpace { get; set; } = true;
     public bool RestoreClipboard { get; set; } = true;
     public int RestoreDelayMs { get; set; } = 400;
+
+    /// <summary>macOS: when no text input is focused, open the transcript (editable, to copy) instead of pasting into nothing.</summary>
+    public bool ShowWhenNoTextField { get; set; } = true;
 }
 
 public sealed class UiConfig

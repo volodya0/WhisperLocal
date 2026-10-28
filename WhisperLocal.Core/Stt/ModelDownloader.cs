@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 namespace WhisperLocal.Stt;
 
 /// <summary>
-/// Downloads a ggml Whisper model (or an LLM for the live hints) from HuggingFace (resuming a partial download) and verifies known hashes,
+/// Downloads a ggml Whisper model (or the GGUF language model) from HuggingFace (resuming a partial download) and verifies known hashes,
 /// like scripts/get-model.ps1 and get-model.sh.
 /// </summary>
 public static class ModelDownloader

@@ -42,9 +42,9 @@ public sealed class LlamaServer : IDisposable
         }
     }
 
-    public static string ResolveServerExe(SuggestConfig c) => AppPaths.ResolveRuntime(c.ServerExe);
+    public static string ResolveServerExe(LocalLlmConfig c) => AppPaths.ResolveRuntime(c.ServerExe);
 
-    public static string ResolveModel(SuggestConfig c) => AppPaths.Resolve(c.ModelPath);
+    public static string ResolveModel(LocalLlmConfig c) => AppPaths.Resolve(c.ModelPath);
 
     /// <summary>Starts the server and loads the model, unless that is done already.</summary>
     /// <remarks>
@@ -58,7 +58,7 @@ public sealed class LlamaServer : IDisposable
         await _startLock.WaitAsync();
         try
         {
-            await EnsureStartedAsync(_config.Current.Suggest, CancellationToken.None);
+            await EnsureStartedAsync(_config.Current.LocalLlm, CancellationToken.None);
         }
         finally
         {
@@ -71,7 +71,7 @@ public sealed class LlamaServer : IDisposable
     public async Task<string> ChatAsync(IReadOnlyList<(string Role, string Content)> messages, double temperature, int maxTokens,
         object? schema, CancellationToken ct)
     {
-        var c = _config.Current.Suggest;
+        var c = _config.Current.LocalLlm;
         await WarmUpAsync(ct);
 
         var body = new Dictionary<string, object?>
@@ -96,6 +96,34 @@ public sealed class LlamaServer : IDisposable
         return doc.RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString() ?? "";
     }
 
+    /// <summary>
+    /// Raw text completion (/completion), like code autocomplete: the model simply continues <paramref name="prompt"/>.
+    /// Returns the continuation, without the stop string that ended it.
+    /// </summary>
+    public async Task<string> CompleteAsync(string prompt, double temperature, int maxTokens, string[] stop, CancellationToken ct)
+    {
+        var c = _config.Current.LocalLlm;
+        await WarmUpAsync(ct);
+
+        var body = new Dictionary<string, object?>
+        {
+            ["prompt"] = prompt,
+            ["n_predict"] = maxTokens,
+            ["temperature"] = temperature,
+            ["stop"] = stop,
+            ["stream"] = false,
+            ["cache_prompt"] = true, // the transcript only grows at the end: each refresh evaluates just the new words
+        };
+        using var content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        using var response = await _http.PostAsync(BaseUrl(c) + "/completion", content, ct);
+        var json = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException($"llama-server returned {(int)response.StatusCode}: {Truncate(json)}");
+
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("content").GetString() ?? "";
+    }
+
     public void Unload()
     {
         if (_process != null)
@@ -104,7 +132,7 @@ public sealed class LlamaServer : IDisposable
         _signature = null;
     }
 
-    private async Task EnsureStartedAsync(SuggestConfig c, CancellationToken ct)
+    private async Task EnsureStartedAsync(LocalLlmConfig c, CancellationToken ct)
     {
         var exe = ResolveServerExe(c);
         var model = ResolveModel(c);
@@ -123,13 +151,13 @@ public sealed class LlamaServer : IDisposable
         if (!File.Exists(exe))
             throw new FileNotFoundException($"llama-server not found: {exe}. Run scripts/build-mac.sh, which builds it.");
         if (!File.Exists(model))
-            throw new FileNotFoundException($"Language model not downloaded: {model}. Download it in the main window (Live hints).");
+            throw new FileNotFoundException($"Language model not downloaded: {model}. Download it in the main window (Language model).");
 
         ChildProcessJob.KillOrphans();
 
         // Only the bundled server is used; anything else on the port is a configuration error
         if (await PingAsync(c, ct) != null)
-            throw new InvalidOperationException($"Port {c.Port} is already in use by another process, change Suggest.Port in the config");
+            throw new InvalidOperationException($"Port {c.Port} is already in use by another process, change LocalLlm.Port in the config");
 
         var psi = new ProcessStartInfo(exe, args)
         {
@@ -178,7 +206,7 @@ public sealed class LlamaServer : IDisposable
     }
 
     /// <summary>null: nothing listens on the port; false: listening, still loading; true: ready.</summary>
-    private async Task<bool?> PingAsync(SuggestConfig c, CancellationToken ct)
+    private async Task<bool?> PingAsync(LocalLlmConfig c, CancellationToken ct)
     {
         try
         {
@@ -216,7 +244,7 @@ public sealed class LlamaServer : IDisposable
         p.Dispose();
     }
 
-    private static string BaseUrl(SuggestConfig c) => $"http://{c.Host}:{c.Port}";
+    private static string BaseUrl(LocalLlmConfig c) => $"http://{c.Host}:{c.Port}";
 
     private static string Truncate(string s) => s.Length <= 300 ? s : s[..300] + "...";
 

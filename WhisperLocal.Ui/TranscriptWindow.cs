@@ -6,11 +6,12 @@ using Avalonia.Threading;
 
 namespace WhisperLocal.Ui;
 
-/// <summary>Shows a dictation's text with a Copy button, just above the recording indicator.</summary>
+/// <summary>Shows a dictation's text, editable, with a Copy button, just above the recording indicator.</summary>
 public sealed class TranscriptWindow : Window
 {
     private readonly TextBox _text;
     private readonly TextBlock _words = DarkTheme.MutedLabel("");
+    private readonly TextBlock _note = DarkTheme.Label("", 12, brush: DarkTheme.Warning);
     private readonly Button _copy;
     private bool _allowClose;
 
@@ -48,7 +49,9 @@ public sealed class TranscriptWindow : Window
         Grid.SetColumn(_copy, 2);
         footer.Children.Add(_copy);
         DockPanel.SetDock(footer, Dock.Bottom);
-        Content = new DockPanel { Margin = new Thickness(12), Children = { footer, _text } };
+        _note.Margin = new Thickness(2, 0, 0, 8);
+        DockPanel.SetDock(_note, Dock.Top);
+        Content = new DockPanel { Margin = new Thickness(12), Children = { footer, _note, _text } };
 
         // Reused: closing only hides it
         Closing += (_, e) =>
@@ -60,9 +63,12 @@ public sealed class TranscriptWindow : Window
         };
     }
 
-    public void ShowText(string text)
+    /// <param name="note">A line above the text, e.g. why it was not pasted; null for none.</param>
+    public void ShowText(string text, string? note = null)
     {
         _text.Text = text;
+        _note.Text = note ?? "";
+        _note.IsVisible = note != null;
         _copy.Content = "Copy";
         PlaceAboveIndicator();
         Show();
