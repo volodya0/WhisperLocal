@@ -109,7 +109,7 @@ macOS specifics:
   Mac keys in the same place. For `Fn`, set System Settings → Keyboard → "Press 🌐 key to" → "Do Nothing".
 - Updates are manual: "Check for Updates…" (menu and setup window) looks at the GitHub releases of the repository
   the app was built from and, after asking, downloads the DMG, checks its checksum and signer, replaces the app and
-  restarts. Every push to `macos-support` is released automatically as `v1.0.<build number>`; a tag like `v1.2.0`
+  restarts. Every push to `main` is released automatically as `v1.0.<build number>`; a tag like `v1.2.0`
   is released with that version.
   With the `MACOS_CERT_P12` / `MACOS_CERT_PASSWORD` secrets (a self-signed code signing certificate is enough) every
   build carries the same signature, so the Accessibility permission survives updates.
