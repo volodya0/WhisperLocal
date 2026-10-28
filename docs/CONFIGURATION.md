@@ -9,7 +9,7 @@ If the file is missing, the app writes one with the defaults.
 | | File | How to open it |
 |---|---|---|
 | macOS | `~/Library/Application Support/WhisperLocal/config.json` | Main window → **Config** |
-| Windows | `config.json` next to `WhisperLocal.exe` | Main window → **Config**, or tray icon → **Open config** |
+| Windows | `config.json` next to `WhisperLocal.exe` | Main window → **Config** |
 
 macOS: the app's own `WhisperLocal.Mac/config.json` is copied there on the first run only; afterwards the copy in
 Application Support is the one to edit. Delete it to get the defaults back.
@@ -38,7 +38,7 @@ relative to the data folder.
 | `Memory.IdleUnloadMinutes` | Unload the models after this many minutes without dictation (default 5; 0 = never). |
 | `Insert.AppendTrailingSpace` | Add a space after the pasted text. |
 | `Insert.RestoreClipboard` | Put the previous clipboard content back after pasting. |
-| `Insert.ShowWhenNoTextField` | macOS: when no text field is focused, open the transcript instead of pasting. |
+| `Insert.ShowWhenNoTextField` | When nothing can take text (macOS: no text field focused; Windows: the desktop or the taskbar), open the transcript instead of pasting. |
 | `Ui.ShowOverlay` | Show the indicator at the bottom of the screen. |
 | `Ui.ResultSeconds` | How long the indicator shows a dictation's summary. |
 | `Logging.LogText` | Keep the text of each dictation in the log and the history (on by default). |

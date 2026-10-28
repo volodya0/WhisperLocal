@@ -129,10 +129,14 @@
   "Insert": {
     "AppendTrailingSpace": true,
     "RestoreClipboard": true,
-    "RestoreDelayMs": 400
+    "RestoreDelayMs": 400,
+    // When nothing can take text (the desktop, the taskbar), open the transcript to edit and copy instead of pasting
+    "ShowWhenNoTextField": true
   },
   "Ui": {
-    "ShowOverlay": true
+    "ShowOverlay": true,
+    // Seconds the indicator keeps a successful dictation's summary (longer while the mouse is over it)
+    "ResultSeconds": 3
   },
   "Logging": {
     "LogText": true,

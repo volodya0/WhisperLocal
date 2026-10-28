@@ -75,14 +75,15 @@ the corrected text or copy it; or just ignore it — it goes away by itself. It 
 
 ## Menu
 
+The menu bar icon on macOS, the tray icon on Windows:
+
 - **Open WhisperLocal…** — the main window.
 - **Show Last Transcript** — the text of the last dictation.
-- **Check for Updates…** (macOS) — looks for a new version and, if you agree, installs it and restarts.
+- **Check for Updates…** — looks for a new version and, if you agree, installs it and restarts (on Windows it opens
+  the releases page for now).
 - **Enabled** — pause or resume dictation.
 - **Unload from memory** — free the memory the models use; the next dictation loads them again.
 - **Quit WhisperLocal**.
-
-The Windows tray menu has the same items, without Check for Updates, plus Open config and Open log; Exit quits.
 
 ## Troubleshooting
 
@@ -96,7 +97,7 @@ The Windows tray menu has the same items, without Check for Updates, plus Open c
   app; run WhisperLocal as administrator too.
 - **Slow on a Windows PC with two GPUs.** It may be using the integrated one: see
   [choosing the GPU](docs/CONFIGURATION.md#choosing-the-gpu-windows).
-- Anything else: the log (main window → **Log**, or tray → **Open log**) usually says what went wrong.
+- Anything else: the log (main window → **Log**) usually says what went wrong.
 
 ## Privacy
 

@@ -22,6 +22,9 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
 
     private const string ReleasesUrl = "https://github.com/volodya0/WhisperLocal/releases";
 
+    // Failures and "no speech" need only a glance; a successful summary stays Ui.ResultSeconds
+    private static readonly TimeSpan BriefDisplay = TimeSpan.FromSeconds(2);
+
     private readonly ConfigManager _config;
     private readonly SynchronizationContext _ui;
     private readonly DictationHistory _history;
@@ -36,7 +39,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     private readonly OllamaCleaner _llm;
     private readonly DictationPipeline _pipeline;
     private readonly TextInserter _inserter = new();
-    private readonly RecordingOverlay _overlay = new();
+    private readonly RecordingOverlay _overlay;
     private readonly TranscriptWindow _transcriptWindow = new();
     private readonly MainWindow _mainWindow;
     private readonly System.Windows.Forms.Timer _idleTimer = new() { Interval = 30_000 };
@@ -72,7 +75,9 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         _llm = new OllamaCleaner(config);
         _pipeline = new DictationPipeline(config, _stt, _llm);
         _mainWindow = new MainWindow(this, _transcriptWindow);
+        _overlay = new RecordingOverlay(ShowLastTranscript);
 
+        // The same menu as the macOS menu bar item
         var openItem = new ToolStripMenuItem("Open WhisperLocal…", null, (_, _) => ShowMainWindow());
         openItem.Font = new Font(openItem.Font, FontStyle.Bold); // the double-click action
         _transcriptItem = new ToolStripMenuItem("Show Last Transcript", null, (_, _) => ShowLastTranscript());
@@ -83,14 +88,12 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         [
             openItem,
             _transcriptItem,
+            new ToolStripMenuItem("Check for Updates…", null, (_, _) => CheckForUpdates()),
             new ToolStripSeparator(),
             _enabledItem,
             _unloadItem,
             new ToolStripSeparator(),
-            new ToolStripMenuItem("Open config", null, (_, _) => OpenPath(_config.FilePath, textEditor: true)),
-            new ToolStripMenuItem("Open log", null, (_, _) => OpenPath(Log.CurrentFile, textEditor: true)),
-            new ToolStripSeparator(),
-            new ToolStripMenuItem("Exit", null, (_, _) => ExitApp()),
+            new ToolStripMenuItem("Quit WhisperLocal", null, (_, _) => ExitApp()),
         ]);
 
         menu.Opening += (_, _) =>
@@ -290,6 +293,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
             return;
         Log.Info("Recording cancelled: another key was pressed while holding the hotkey");
         await _recorder.StopAsync();
+        _overlay.Hide();
         SetState(State.Idle);
     }
 
@@ -324,6 +328,8 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         _pressedAt = Stopwatch.GetTimestamp();
         _lastActivityUtc = DateTime.UtcNow;
         SetState(State.Recording);
+        if (cfg.Ui.ShowOverlay)
+            _overlay.ShowRecording(_pressedAt);
         _ = _pipeline.PrepareAsync();
     }
 
@@ -338,6 +344,8 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         var recordSec = Stopwatch.GetElapsedTime(_pressedAt).TotalSeconds;
         var processStart = Stopwatch.GetTimestamp();
         SetState(State.Processing);
+        if (cfg.Ui.ShowOverlay)
+            _overlay.ShowProcessing(processStart);
 
         DictationResult? result = null;
         string? error = null;
@@ -356,6 +364,14 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
             if (string.IsNullOrWhiteSpace(result.FinalText))
                 return;
 
+            // Nowhere to type (the desktop, the taskbar): show the text to edit and copy instead of pasting into nothing
+            if (cfg.Insert.ShowWhenNoTextField && ForegroundApp.Capture().AcceptsText() == false)
+            {
+                Log.Info("No text input is focused: showing the transcript instead of pasting");
+                _transcriptWindow.ShowText(result.FinalText, "No text field was focused, so nothing was pasted. Edit and copy it here:");
+                return;
+            }
+
             var text = cfg.Insert.AppendTrailingSpace ? result.FinalText + " " : result.FinalText;
             await _inserter.InsertAsync(text, _target, cfg.Insert);
         }
@@ -368,19 +384,32 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         {
             _lastActivityUtc = DateTime.UtcNow;
             SetState(State.Idle);
-            if (!tap)
-                RecordOutcome(recordSec, Stopwatch.GetElapsedTime(processStart).TotalSeconds, result, error);
+            if (tap)
+                _overlay.Hide();
+            else
+                ShowOutcome(recordSec, Stopwatch.GetElapsedTime(processStart).TotalSeconds, result, error);
         }
     }
 
-    /// <summary>A record in the history and the statistics; the last text for "Show Last Transcript".</summary>
-    private void RecordOutcome(double recordSec, double processSec, DictationResult? result, string? error)
+    /// <summary>The short summary on the indicator, and a record in the history.</summary>
+    private void ShowOutcome(double recordSec, double processSec, DictationResult? result, string? error)
     {
         var cfg = _config.Current;
         var text = result?.FinalText.Trim() ?? "";
         var words = text.Length == 0 ? 0 : TextFilters.CountWords(text);
         if (words > 0)
             _lastTranscript = text;
+
+        if (cfg.Ui.ShowOverlay)
+        {
+            if (error != null)
+                _overlay.ShowResult($"✕ Failed: {error}", Color.FromArgb(255, 102, 102), hasText: false, BriefDisplay);
+            else if (words > 0)
+                _overlay.ShowResult($"✓ {recordSec:F1} s rec · {processSec:F1} s proc · {words} {(words == 1 ? "word" : "words")}",
+                    Color.FromArgb(115, 224, 128), hasText: true, TimeSpan.FromSeconds(Math.Max(1, cfg.Ui.ResultSeconds)));
+            else
+                _overlay.ShowResult($"No speech recognized · {recordSec:F1} s", Color.FromArgb(191, 191, 191), hasText: false, BriefDisplay);
+        }
 
         var record = new DictationRecord(
             DateTime.UtcNow,
@@ -417,6 +446,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         if (_state == State.Recording)
         {
             await _recorder.StopAsync();
+            _overlay.Hide();
             SetState(State.Idle);
         }
 
@@ -509,21 +539,6 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     private void SetState(State state)
     {
         _state = state;
-        if (_config.Current.Ui.ShowOverlay)
-        {
-            switch (state)
-            {
-                case State.Recording:
-                    _overlay.ShowState("● Recording", Color.FromArgb(255, 90, 90));
-                    break;
-                case State.Processing:
-                    _overlay.ShowState("… Processing", Color.FromArgb(255, 180, 60));
-                    break;
-                default:
-                    _overlay.Hide();
-                    break;
-            }
-        }
         UpdateTrayState();
     }
 
