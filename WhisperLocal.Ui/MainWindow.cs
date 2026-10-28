@@ -57,6 +57,7 @@ public sealed class MainWindow : Window
     private string? _shownSetup;
     private string? _shownHintStatus;
     private string? _shownHintModel;
+    private bool? _shownHintsEnabled;
     private bool _updatingHints;
     private List<string> _hintModelPaths = [];
     private bool _updatingHotkeys;
@@ -497,7 +498,12 @@ public sealed class MainWindow : Window
     {
         var c = _host.Config.Current.Suggest;
         _updatingHints = true;
-        _hintsEnabled.IsChecked = c.Enabled;
+        // Only on a change in the config: a click shows at once, the config catches up after the save
+        if (c.Enabled != _shownHintsEnabled)
+        {
+            _shownHintsEnabled = c.Enabled;
+            _hintsEnabled.IsChecked = c.Enabled;
+        }
         if (c.ModelPath != _shownHintModel)
         {
             _shownHintModel = c.ModelPath;

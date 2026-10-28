@@ -86,7 +86,8 @@ internal sealed class SuggestionPanel : IDisposable
         var count = Math.Min(hints.Count, MaxRows);
         var height = Padding * 2 + HeaderHeight + count * RowHeight;
 
-        Send(_header, Sel("setStringValue:"), Str($"Continue · ⌥1–{count} or click to insert · Esc or any key to close"));
+        var keys = count == 1 ? "⌥1" : $"⌥1–{count}";
+        Send(_header, Sel("setStringValue:"), Str($"Continue · {keys} or click to insert · Esc or any key to close"));
         Send(_header, Sel("setFrame:"), new NSRect(14, height - Padding - HeaderHeight + 2, Width - 28, 16));
         for (var i = 0; i < MaxRows; i++)
         {

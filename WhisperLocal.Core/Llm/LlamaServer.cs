@@ -48,12 +48,18 @@ public sealed class LlamaServer : IDisposable
     public static string ResolveModel(SuggestConfig c) => AppPaths.Resolve(c.ModelPath);
 
     /// <summary>Starts the server and loads the model, unless that is done already.</summary>
-    public async Task WarmUpAsync(CancellationToken ct)
+    /// <remarks>
+    /// <paramref name="ct"/> only stops the waiting: loading goes on, otherwise every hint request cancelled by a key
+    /// press during a cold start would kill the half-loaded server and the next one would start over.
+    /// </remarks>
+    public Task WarmUpAsync(CancellationToken ct) => WarmUpCoreAsync().WaitAsync(ct);
+
+    private async Task WarmUpCoreAsync()
     {
-        await _startLock.WaitAsync(ct);
+        await _startLock.WaitAsync();
         try
         {
-            await EnsureStartedAsync(_config.Current.Suggest, ct);
+            await EnsureStartedAsync(_config.Current.Suggest, CancellationToken.None);
         }
         finally
         {

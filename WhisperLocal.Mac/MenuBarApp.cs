@@ -520,7 +520,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         {
             var hints = await _suggester.SuggestAsync(target?.ProcessName, request.Token);
             var insertedAt = await inserted;
-            if (request.IsCancellationRequested || _state != State.Idle || hints.Count == 0)
+            // A new dictation cancels the request; Processing here is still the dictation these hints belong to
+            if (request.IsCancellationRequested || _state == State.Recording || hints.Count == 0)
                 return;
 
             // Typing after the paste means the user went on without hints; showing them now would only get in the way
