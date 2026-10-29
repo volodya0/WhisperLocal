@@ -126,6 +126,9 @@ internal static class DarkTheme
         };
     }
 
+    /// <summary>A checkbox with the page's text size and color.</summary>
+    public static CheckBox CheckBox(string text) => new() { Content = text, FontSize = 13, Foreground = Text };
+
     /// <summary>Dropdown with the same height and text size as the buttons.</summary>
     public static ComboBox Dropdown(double width) => new()
     {

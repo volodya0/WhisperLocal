@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Listening tells who said what. **Include me** (Notes & Translate → Listening, on by default, `Listen.IncludeMe`)
+  writes down what you say into the microphone too, as **Me** in green; without headphones, lines that are only the
+  speakers' echo are left out (their loudness follows the system audio, or their words repeat its line). **Tell the
+  other speakers apart** (on by default, `Listen.SeparateSpeakers`) names the voices the Mac plays Speaker 1, 2, …,
+  each in its own color, and cuts a line where another speaker starts; it uses a 28 MB voice model (CAM++, via
+  sherpa-onnx) downloaded on Models → Speaker separation, and runs on the Mac.
+- The listening note is laid out like the panel: time, speaker, text and the translation beside it, as a Markdown
+  table, or as columns in plain text.
 - Models → Cloud shows usage under each connected provider: what WhisperLocal sent today (recordings and their
   length, translations and tokens), requests in the last minute, Groq's limits left (requests today, tokens this
   minute, from its answers) and a limit reached in the last hour. Counted on this computer, kept for the day in

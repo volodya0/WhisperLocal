@@ -6,6 +6,7 @@ using Avalonia.Media;
 using WhisperLocal.Cloud;
 using WhisperLocal.Config;
 using WhisperLocal.Llm;
+using WhisperLocal.Pipeline;
 using WhisperLocal.Stt;
 
 namespace WhisperLocal.Ui.Pages;
@@ -32,11 +33,13 @@ internal sealed class ModelsPage : Page
     private bool _updating;
     private readonly StackPanel _speechRows = new();
     private readonly StackPanel _llmRows = new();
+    private readonly StackPanel _voiceRows = new();
     private readonly Note _note = new();
     private readonly CloudCard _gemini;
     private readonly CloudCard _groq;
     private string? _shownSpeech;
     private string? _shownLlm;
+    private string? _shownVoice;
     private string? _confirmDelete; // the model path whose Delete was clicked once
 
     public ModelsPage(IAppHost host) : base("Models")
@@ -50,6 +53,8 @@ internal sealed class ModelsPage : Page
         }));
         if (host.HasGrammarCheck)
             Add(DarkTheme.Section("Language models", _llmRows));
+        if (host.HasSpeakerSeparation)
+            Add(DarkTheme.Section("Speaker separation", _voiceRows));
         _unloadAll = DarkTheme.Button("Unload All", () => _ = UnloadAllAsync(), small: true);
         ToolTip.SetTip(_unloadAll, "Frees the memory now; models load again when you dictate, listen or check grammar");
         var unload = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
@@ -86,7 +91,7 @@ internal sealed class ModelsPage : Page
         if (_confirmDelete == null)
             return;
         _confirmDelete = null; // a Delete clicked once does not stay armed
-        _shownSpeech = _shownLlm = null;
+        InvalidateRows();
     }
 
     public override void Refresh()
@@ -95,6 +100,8 @@ internal sealed class ModelsPage : Page
         RefreshSpeech(cfg);
         if (_host.HasGrammarCheck)
             RefreshLlm(cfg);
+        if (_host.HasSpeakerSeparation)
+            RefreshVoice(cfg);
         RefreshLoaded();
         RefreshIdle(cfg.Memory.IdleUnloadMinutes);
         _gemini.Refresh(cfg.Cloud.GeminiApiKey.Trim());
@@ -106,10 +113,16 @@ internal sealed class ModelsPage : Page
     /// <summary>
     /// One catalog model: <paramref name="Path"/> is its config value ("models/…"); <paramref name="Needed"/> when
     /// the selected model is used now, so a missing one is an error (the grammar check may be off);
-    /// <paramref name="Chooser"/> names the page where another model is chosen.
+    /// <paramref name="KeepText"/> says why the model in use cannot be deleted (where another one is chosen).
     /// </summary>
     private sealed record ModelRow(string Title, string Size, string Hint, string Path, bool InUse, string InUseText, bool Needed, string? Url,
-        string Chooser);
+        string KeepText);
+
+    private const string SpeechKeepText = "In use: choose another model in Speech to Text first";
+    private const string LlmKeepText = "In use: choose another model in Speech to Text or Notes & Translate first";
+
+    /// <summary>The model rows are rebuilt on the next refresh.</summary>
+    private void InvalidateRows() => _shownSpeech = _shownLlm = _shownVoice = null;
 
     private void RefreshSpeech(AppConfig cfg)
     {
@@ -119,11 +132,11 @@ internal sealed class ModelsPage : Page
         var inUse = cloud != null ? $"Fallback for {cloud}" : "In use";
         var needed = cloud == null || cfg.Recognition.FallbackToLocal;
         var rows = WhisperModels.Catalog
-            .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, WhisperModels.Find(current) == m, inUse, needed, null, "Speech to Text"))
+            .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, WhisperModels.Find(current) == m, inUse, needed, null, SpeechKeepText))
             .ToList();
         if (WhisperModels.Find(current) == null)
             rows.Add(new ModelRow($"Custom: {System.IO.Path.GetFileName(current)}", "", "Set in the config (Whisper.ModelPath).", current, true, inUse, needed,
-                null, "Speech to Text"));
+                null, SpeechKeepText));
         RenderRows(_speechRows, rows, ref _shownSpeech);
     }
 
@@ -142,12 +155,25 @@ internal sealed class ModelsPage : Page
         };
         var rows = LlmModels.Catalog
             .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, LlmModels.Find(current) == m, inUse, used, m.Url,
-                "Speech to Text or Notes & Translate"))
+                LlmKeepText))
             .ToList();
         if (LlmModels.Find(current) == null)
             rows.Add(new ModelRow($"Custom: {System.IO.Path.GetFileName(current)}", "", "Set in the config (LocalLlm.ModelPath).", current, true, inUse, used,
-                null, "Speech to Text or Notes & Translate"));
+                null, LlmKeepText));
         RenderRows(_llmRows, rows, ref _shownLlm);
+    }
+
+    /// <summary>The voice model for telling speakers apart while listening: in use while that is on.</summary>
+    private void RefreshVoice(AppConfig cfg)
+    {
+        var model = VoiceModels.Default;
+        var inUse = cfg.Listen.SeparateSpeakers;
+        var rows = new List<ModelRow>
+        {
+            new(model.Title, model.Size, model.Hint, cfg.Listen.VoiceModelPath, inUse, "Used for telling speakers apart while listening", inUse,
+                model.Url, "In use: turn telling speakers apart off in Notes & Translate first"),
+        };
+        RenderRows(_voiceRows, rows, ref _shownVoice);
     }
 
     /// <summary>Rebuilt only when a row's state changes, so a button under the mouse keeps its click.</summary>
@@ -219,7 +245,7 @@ internal sealed class ModelsPage : Page
             // The model in use stays: choosing another one first is a decision for that feature's page
             button = DarkTheme.Button("Delete", () => { }, small: true);
             button.IsEnabled = false;
-            ToolTip.SetTip(button, $"In use: choose another model in {row.Chooser} first");
+            ToolTip.SetTip(button, row.KeepText);
         }
         else if (downloaded)
         {
@@ -242,7 +268,7 @@ internal sealed class ModelsPage : Page
         if (_confirmDelete != path)
         {
             _confirmDelete = path;
-            _shownSpeech = _shownLlm = null;
+            InvalidateRows();
             Refresh();
             return;
         }
@@ -259,7 +285,7 @@ internal sealed class ModelsPage : Page
             Log.Error($"Deleting {file} failed", ex);
             _note.Set($"Could not delete it: {ex.Message}", DarkTheme.Error);
         }
-        _shownSpeech = _shownLlm = null;
+        InvalidateRows();
         Refresh();
     }
 

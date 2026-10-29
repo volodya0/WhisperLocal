@@ -1,3 +1,5 @@
+using WhisperLocal.Pipeline;
+
 namespace WhisperLocal.Config;
 
 public sealed class AppConfig
@@ -313,6 +315,21 @@ public sealed class ListenConfig
     /// (Cloud.GeminiTextModel) or "Groq" (Cloud.GroqTextModel); a cloud engine without its key translates locally.
     /// </summary>
     public string TranslateEngine { get; set; } = "Local";
+
+    /// <summary>
+    /// Also write down what is said into the microphone, as "Me"; what the Mac plays is everyone else. Without
+    /// headphones the microphone hears the speakers too: such lines are recognised as an echo and dropped.
+    /// </summary>
+    public bool IncludeMe { get; set; } = true;
+
+    /// <summary>Tell the voices in what the Mac plays apart (Speaker 1, 2, …) with the voice model (VoiceModelPath).</summary>
+    public bool SeparateSpeakers { get; set; } = true;
+
+    /// <summary>The voice model for SeparateSpeakers, relative to the data directory; downloaded on the Models page.</summary>
+    public string VoiceModelPath { get; set; } = "models/" + VoiceModels.Default.File;
+
+    /// <summary>How alike two lines' voices must be (cosine similarity, 0–1) to count as the same speaker.</summary>
+    public double SpeakerThreshold { get; set; } = VoiceModels.DefaultThreshold;
 
     /// <summary>Languages offered in the indicator's menu.</summary>
     public List<string> Languages { get; set; } = ["uk", "en", "de", "pl", "es", "fr"];

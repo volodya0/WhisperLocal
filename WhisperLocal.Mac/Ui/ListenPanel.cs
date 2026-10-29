@@ -36,6 +36,14 @@ internal sealed class ListenPanel : IDisposable
     private static readonly (double R, double G, double B) TranslationColor = (0.55, 0.8, 1.0);
     private static readonly (double R, double G, double B) MutedColor = (0.6, 0.6, 0.62);
 
+    // Who spoke: the user green, "Them" in the plain text color, Speaker 1, 2, … each in its own color (cycling)
+    private static readonly (double R, double G, double B) MeColor = (0.55, 0.9, 0.55);
+    private static readonly (double R, double G, double B)[] SpeakerColors =
+    [
+        (1.0, 0.78, 0.45), (0.5, 0.78, 1.0), (1.0, 0.6, 0.78), (0.75, 0.65, 1.0),
+        (0.45, 0.88, 0.85), (0.95, 0.9, 0.5), (1.0, 0.55, 0.45), (0.75, 0.95, 0.45),
+    ];
+
     /// <summary>One row: a line and its translation next to it.</summary>
     private sealed record Row(IntPtr Original, IntPtr Translation);
 
@@ -260,6 +268,18 @@ internal sealed class ListenPanel : IDisposable
         Send(_status, Sel("setTextColor:"), Color(color));
     }
 
+    /// <summary>The color of a line's speaker: the user, Speaker 1, 2, …, or the plain text color ("Them", or no speakers).</summary>
+    private static (double R, double G, double B) SpeakerColor(ListenLine line) => line.Speaker switch
+    {
+        0 => MeColor,
+        { } n => SpeakerColors[(n - 1) % SpeakerColors.Length],
+        null => TextColor,
+    };
+
+    /// <summary>A translation in its speaker's color, a third of the way to grey.</summary>
+    private static (double R, double G, double B) Dim((double R, double G, double B) c) =>
+        (c.R * 0.67 + MutedColor.R * 0.33, c.G * 0.67 + MutedColor.G * 0.33, c.B * 0.67 + MutedColor.B * 0.33);
+
     /// <summary>Places the header (status left; menu and buttons right) and the list below it for the panel's size.</summary>
     private void Layout()
     {
@@ -303,12 +323,16 @@ internal sealed class ListenPanel : IDisposable
         {
             var line = _lines[i];
             var row = RowAt(placed.Count);
-            SetText(row.Original, line.Text, TextColor);
+            var color = SpeakerColor(line);
+            // The speaker's name where the speaker changes; the color tells the lines after it apart
+            var named = line.SpeakerName != null && (i == 0 || _lines[i - 1].SpeakerName != line.SpeakerName);
+            SetText(row.Original, named ? $"{line.SpeakerName}: {line.Text}" : line.Text, color);
             var height = Measure(row.Original, column);
             if (twoColumns)
             {
                 var pending = line.Translation == null && !line.Done;
-                SetText(row.Translation, line.Translation ?? (pending ? "…" : ""), pending ? MutedColor : TranslationColor);
+                SetText(row.Translation, line.Translation ?? (pending ? "…" : ""),
+                    pending ? MutedColor : line.Speaker == null ? TranslationColor : Dim(color));
                 height = Math.Max(height, Measure(row.Translation, column));
             }
             placed.Add((row, height, twoColumns));

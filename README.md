@@ -123,10 +123,20 @@ key is added, Gemini or Groq, which need no download but get the text of each li
 speaking** on, the sentence still being spoken is translated too, greyed, and the finished line replaces it. The
 language you pick is remembered.
 
+**Who said what.** With **Include me** (on by default), what you say into the microphone is written down too, as
+**Me**, in green. Without headphones the microphone also hears the speakers: those lines are recognised as an echo and
+left out (headphones work best when you talk over the others). With **Tell the other speakers apart** (also on, once
+the 28 MB voice model is downloaded on the **Models** page), the voices the Mac plays become **Speaker 1**, **2**, …,
+each in its own color, and a line is cut where another speaker starts; it works for any language. It compares how the
+voices sound, so two similar voices or people talking over each other can get mixed up. Off, everyone the Mac plays
+is **Them**. Both checkboxes are on the **Notes & Translate** page.
+
 The panel stays until you click its **stop** button (pressing the shortcut again only brings it back); the folder
-button opens the note. Each session is a note with times in your notes folder, so it is on the **Notes** page. The
-shortcut, the language that is heard and the translation language are on the **Notes & Translate** page. Your own
-microphone is not recorded, and listening always recognises on this Mac, even when dictation uses a cloud model.
+button opens the note. Each session is a note in your notes folder, so it is on the **Notes** page, laid out like
+the panel: the time, who spoke and the text, with the translation beside it. A Markdown note is a table (columns in
+Obsidian, Typora, VS Code or GitHub); a plain text note has columns that line up in a monospaced font. The shortcut,
+the language that is heard and the translation language are on the **Notes & Translate** page. Listening always
+recognises on this Mac, even when dictation uses a cloud model.
 
 ## Menu
 
@@ -162,7 +172,7 @@ is downloading models from HuggingFace and, when you ask for it, checking GitHub
 Groq API key with Google or Groq.
 With Gemini as the recognition engine, each recording is sent to Google's Gemini API; on the free tier Google may use
 it to improve its products (see Google's terms). With Groq, each recording is sent to Groq's API (see Groq's terms). Recordings are not saved (listening keeps only the text, in its note). Listening always
-recognises locally, even with a cloud model; with Gemini or Groq as the translation model, the text of each line is
+recognises locally, even with a cloud model, and tells voices apart on this Mac too; with Gemini or Groq as the translation model, the text of each line is
 sent there to be translated. The log and the dictation history keep
 the text of your dictations to help with troubleshooting; set `Logging.LogText` to `false` in the config to stop
 that.

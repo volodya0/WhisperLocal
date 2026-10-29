@@ -102,6 +102,10 @@ CPU; `-ng` runs on the CPU only.
 | `Listen.Language` | Language of what is heard: `"auto"` detects it per segment, a code (`"en"`) fixes it. |
 | `Listen.TranslateTo` | Translate into this language (`"uk"`, `"en"`, …), `""` for the original only. Set from the indicator's menu. |
 | `Listen.TranslateEngine` | What translates: `"Local"` (the `LocalLlm` model, the default), `"Gemini"` (`Cloud.GeminiTextModel`) or `"Groq"` (`Cloud.GroqTextModel`); the text of each line is then sent there. Without that provider's key, the local model translates. Chosen with Notes & Translate → Translation model. |
+| `Listen.IncludeMe` | Also write down what is said into the microphone (`Audio.DeviceName`), as "Me", recognised in `Whisper.Language` (default `true`). An echo of the speakers is left out. |
+| `Listen.SeparateSpeakers` | Tell the voices of what the Mac plays apart (Speaker 1, 2, …) with the voice model, cutting a line where another speaker starts (default `true`; needs `Listen.VoiceModelPath` downloaded). Off: everyone is "Them". |
+| `Listen.VoiceModelPath` | The voice model (speaker embeddings, ONNX) for `Listen.SeparateSpeakers`, relative to the data folder; default `models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx` (CAM++, downloaded on the Models page). |
+| `Listen.SpeakerThreshold` | How alike two voices must sound (cosine similarity, 0–1) to be the same speaker, and below which a line is cut (default `0.6`). Higher tells similar voices apart but may split one person in two. |
 | `Listen.Languages` | The languages the indicator's menu offers. |
 | `Listen.PauseMs`, `Listen.MaxSegmentSec` | A pause this long ends a segment; without a pause it is cut after this many seconds. Default 500 ms and 10 s; Notes & Translate → Line speed sets both with `Listen.ProvisionalMs` (Fast 350/6/500, Balanced 500/10/800, Accurate 600/20/1000). |
 | `Listen.ProvisionalMs` | While a sentence is being spoken, its text so far is shown greyed about this often (ms); `0` turns it off. |

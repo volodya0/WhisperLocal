@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using WhisperLocal.Config;
 using WhisperLocal.Llm;
 using WhisperLocal.Notes;
+using WhisperLocal.Pipeline;
 using WhisperLocal.Stt;
 
 namespace WhisperLocal.Ui.Pages;
@@ -47,6 +48,12 @@ internal sealed class NotesSettingsPage : Page
     private readonly Button _showModels;
     private readonly Note _listenNote = new();
     private readonly TextBlock _speechModel = DarkTheme.MutedLabel("", 11);
+    private readonly CheckBox _includeMe = DarkTheme.CheckBox("Include me: write down what I say into the microphone, as \"Me\"");
+    private readonly CheckBox _separateSpeakers = DarkTheme.CheckBox("Tell the other speakers apart (Speaker 1, 2, …), each in its own color");
+    private readonly TextBlock _voiceMissing = DarkTheme.Label("", 12, brush: DarkTheme.Warning);
+    private readonly Grid _voiceMissingRow = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+    private bool? _shownIncludeMe;
+    private bool? _shownSeparate;
     private readonly TextBlock _translationCloud = DarkTheme.MutedLabel("", 11);
     private string? _shownFolder;
     private string? _shownFormat;
@@ -63,6 +70,10 @@ internal sealed class NotesSettingsPage : Page
     {
         _host = host;
         _showModels = DarkTheme.Button("Models", showModels, small: true);
+        _voiceMissingRow.Children.Add(_voiceMissing);
+        var voiceModels = DarkTheme.Button("Models", showModels, small: true);
+        Grid.SetColumn(voiceModels, 1);
+        _voiceMissingRow.Children.Add(voiceModels);
         _default = DarkTheme.Button("Use Default", () => Widgets.Save(_host, "Notes", "Folder", "", _note), small: true);
         ToolTip.SetTip(_default, NoteFiles.DefaultFolder);
 
@@ -120,6 +131,24 @@ internal sealed class NotesSettingsPage : Page
                 Widgets.Save(_host, "Listen", "TranslateTo", _translateCodes[i], _listenNote);
         };
         _translationModel.SelectionChanged += (_, _) => OnTranslationModelSelected();
+        _includeMe.IsCheckedChanged += (_, _) =>
+        {
+            if (!_updating)
+                Widgets.Save(_host, "Listen", "IncludeMe", _includeMe.IsChecked == true, _listenNote);
+        };
+        ToolTip.SetTip(_includeMe,
+            "Your microphone is recorded along with what the Mac plays. Without headphones it also hears the speakers: " +
+            "such lines are recognised as an echo and left out. Applies from the next listening.");
+        _separateSpeakers.IsCheckedChanged += (_, _) =>
+        {
+            if (!_updating)
+                Widgets.Save(_host, "Listen", "SeparateSpeakers", _separateSpeakers.IsChecked == true, _listenNote);
+        };
+        ToolTip.SetTip(_separateSpeakers,
+            "A voice model on this Mac compares how the voices sound; a line is cut where another speaker starts. " +
+            "Off: everyone the Mac plays is \"Them\". Applies from the next listening.");
+        _voiceMissing.TextWrapping = TextWrapping.Wrap;
+        _voiceMissing.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
         _speed.SelectionChanged += (_, _) =>
         {
             var i = _speed.SelectedIndex;
@@ -159,6 +188,9 @@ internal sealed class NotesSettingsPage : Page
                 DarkTheme.MutedLabel("Press the shortcut to write down what the Mac plays (a call, a video) as a note here; " +
                                      "the panel's stop button ends it, and its menu changes the translation language."),
                 Widgets.Fields(("Shortcut", shortcut)),
+                _includeMe,
+                _separateSpeakers,
+                _voiceMissingRow,
                 Widgets.Fields(("Heard in", _heard), ("Translate into", _translateTo)),
                 Widgets.Fields(("Translation model", _translationModel)),
                 Widgets.Fields(("Line speed", _speed)),
@@ -207,6 +239,7 @@ internal sealed class NotesSettingsPage : Page
             return;
         RefreshModelMissing(cfg);
         RefreshSpeechModel(cfg);
+        RefreshSpeakers(listen);
         var signature = $"{listen.Hotkey}|{listen.Language}|{listen.TranslateTo}|{string.Join(",", listen.Languages)}|{cfg.LocalLlm.ModelPath}|" +
                         $"{listen.TranslateEngine}|{cfg.Cloud.GeminiTextModel}|{cfg.Cloud.GroqTextModel}|" +
                         $"{cfg.Cloud.GeminiApiKey.Trim().Length > 0}|{cfg.Cloud.GroqApiKey.Trim().Length > 0}|" +
@@ -345,6 +378,27 @@ internal sealed class NotesSettingsPage : Page
             _ => $"Speech is recognised with {name}, the local model set in Speech to Text: it is not downloaded yet.",
         };
         _speechModel.Foreground = ready ? DarkTheme.Muted : DarkTheme.Warning;
+    }
+
+    /// <summary>
+    /// The two speaker checkboxes, only on a change in the config (a click shows at once); and, checked every time,
+    /// whether telling speakers apart waits for the voice model.
+    /// </summary>
+    private void RefreshSpeakers(ListenConfig listen)
+    {
+        _updating = true;
+        if (listen.IncludeMe != _shownIncludeMe)
+            _includeMe.IsChecked = _shownIncludeMe = listen.IncludeMe;
+        if (listen.SeparateSpeakers != _shownSeparate)
+            _separateSpeakers.IsChecked = _shownSeparate = listen.SeparateSpeakers;
+        _updating = false;
+
+        var missing = listen.SeparateSpeakers && !File.Exists(AppPaths.Resolve(listen.VoiceModelPath));
+        _voiceMissingRow.IsVisible = missing;
+        if (missing)
+            _voiceMissing.Text = _host.DownloadProgress(listen.VoiceModelPath)
+                                 ?? $"Telling speakers apart needs the voice model ({VoiceModels.Find(listen.VoiceModelPath)?.Size ?? "a model file"}): " +
+                                 "download it on the Models page. Until then the others are all \"Them\".";
     }
 
     /// <summary>A translation language is chosen but its model is not downloaded: say so, with a way to Models.</summary>

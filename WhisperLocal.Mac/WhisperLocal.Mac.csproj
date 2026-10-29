@@ -33,6 +33,12 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
   </ItemGroup>
 
+  <!-- sherpa-onnx (Apache-2.0): voiceprints that tell speakers apart while listening; its native libraries
+       (libsherpa-onnx-c-api, libonnxruntime) come with the package for the publish RID -->
+  <ItemGroup>
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
+  </ItemGroup>
+
   <!-- whisper-server built by scripts/build-mac.sh (Runtime/whisper/* → <output>/whisper/*), not in git -->
   <ItemGroup>
     <None Include="Runtime\**\*" Link="%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

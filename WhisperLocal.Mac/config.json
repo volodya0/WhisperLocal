@@ -168,6 +168,10 @@
     "TranslateTo": "",
     // What translates: "Local" (the LocalLlm model), "Gemini" (Cloud.GeminiTextModel) or "Groq" (Cloud.GroqTextModel)
     "TranslateEngine": "Local",
+    // Also write down what is said into the microphone, as "Me" (an echo of the speakers is left out)
+    "IncludeMe": true,
+    // Tell the voices of what the Mac plays apart (Speaker 1, 2, …) with the voice model from the Models page
+    "SeparateSpeakers": true,
     "Languages": [ "uk", "en", "de", "pl", "es", "fr" ],
     // How quickly lines come (Notes & Translate → Line speed): a pause this long, or this many seconds, ends a line
     "PauseMs": 500,

@@ -41,6 +41,35 @@ internal static class AudioConvert
 
     public static double DurationMs(byte[] pcm) => pcm.Length * 1000.0 / TargetFormat.AverageBytesPerSecond;
 
+    /// <summary>The byte length of <paramref name="ms"/> of 16 kHz mono 16-bit PCM (even), the inverse of <see cref="DurationMs"/>.</summary>
+    public static int Bytes(int ms) => (int)(TargetFormat.AverageBytesPerSecond * (long)ms / 1000) & ~1;
+
+    /// <summary>The loudness (RMS, 0–1) of every <paramref name="frameSamples"/> samples of 16-bit PCM.</summary>
+    public static double[] FrameRms(ReadOnlySpan<byte> pcm, int frameSamples)
+    {
+        var rms = new double[pcm.Length / 2 / frameSamples];
+        for (var f = 0; f < rms.Length; f++)
+        {
+            double sum = 0;
+            for (var i = 0; i < frameSamples; i++)
+            {
+                double s = BitConverter.ToInt16(pcm.Slice((f * frameSamples + i) * 2, 2)) / 32768.0;
+                sum += s * s;
+            }
+            rms[f] = Math.Sqrt(sum / frameSamples);
+        }
+        return rms;
+    }
+
+    /// <summary>16-bit PCM as samples from -1 to 1.</summary>
+    public static float[] ToFloats(byte[] pcm)
+    {
+        var samples = new float[pcm.Length / 2];
+        for (var i = 0; i < samples.Length; i++)
+            samples[i] = BitConverter.ToInt16(pcm, i * 2) / 32768f;
+        return samples;
+    }
+
     /// <summary>
     /// Speech level in dBFS: mean RMS of the loudest 20% of 30 ms frames,
     /// so long pauses do not drag the level down.

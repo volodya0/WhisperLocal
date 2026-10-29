@@ -23,8 +23,12 @@ public static class ModelDownloader
     public static Task DownloadAsync(string modelPath, IProgress<(long Done, long? Total)> progress, Action verifying, CancellationToken ct) =>
         DownloadAsync(modelPath, UrlFor(modelPath), progress, verifying, ct);
 
-    /// <summary>Any model file (e.g. an LLM's GGUF) from <paramref name="url"/>; verified only if its hash is known.</summary>
-    public static async Task DownloadAsync(string modelPath, string url, IProgress<(long Done, long? Total)> progress, Action verifying, CancellationToken ct)
+    /// <summary>
+    /// Any model file (e.g. an LLM's GGUF) from <paramref name="url"/>; verified only if its hash is known (given as
+    /// <paramref name="sha256"/>, or a known Whisper model).
+    /// </summary>
+    public static async Task DownloadAsync(string modelPath, string url, IProgress<(long Done, long? Total)> progress, Action verifying, CancellationToken ct,
+        string? sha256 = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
         var partial = modelPath + ".partial";
@@ -41,7 +45,7 @@ public static class ModelDownloader
         if (response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable && existing > 0)
         {
             progress.Report((existing, existing));
-            await VerifyAndInstallAsync(partial, modelPath, verifying, ct);
+            await VerifyAndInstallAsync(partial, modelPath, sha256, verifying, ct);
             return;
         }
         response.EnsureSuccessStatusCode();
@@ -72,12 +76,12 @@ public static class ModelDownloader
             progress.Report((done, total));
         }
 
-        await VerifyAndInstallAsync(partial, modelPath, verifying, ct);
+        await VerifyAndInstallAsync(partial, modelPath, sha256, verifying, ct);
     }
 
-    private static async Task VerifyAndInstallAsync(string partial, string modelPath, Action verifying, CancellationToken ct)
+    private static async Task VerifyAndInstallAsync(string partial, string modelPath, string? sha256, Action verifying, CancellationToken ct)
     {
-        if (KnownHashes.TryGetValue(Path.GetFileName(modelPath), out var expected))
+        if ((sha256 ?? KnownHashes.GetValueOrDefault(Path.GetFileName(modelPath))) is { } expected)
         {
             verifying();
             var actual = await Task.Run(() =>

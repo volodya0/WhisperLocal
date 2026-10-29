@@ -80,8 +80,11 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Cloud/GroqClient.cs` | Groq API (OpenAI-compatible) with the user's key: checks that a key works; transcribes a recording with Whisper on Groq, following `Whisper.Language` like local recognition; text requests (translation, chat completions in JSON mode). |
 | `Notes/NoteFiles.cs` | The notes folder: lists `.md`/`.txt` files newest first with their first line, creates new notes. |
 | `Pipeline/LiveAutocomplete.cs` | Autocomplete loop while the hotkey is held (shelved). |
-| `Pipeline/LiveListener.cs` | Listening: cuts the system audio stream into segments at pauses, transcribes and optionally translates them (two lines at once, finished in order); the sentence being spoken is shown and, if wanted, translated as it goes. |
-| `Pipeline/ListenNotes.cs` | Listening: the Markdown notes file of a session, written line by line. |
+| `Pipeline/LiveListener.cs` | Listening: cuts the system audio and microphone streams into segments at pauses (and, telling speakers apart, where another voice starts), transcribes and optionally translates them (two lines at once, finished in order); labels who spoke (Me, Speaker 1, 2, … or Them) and drops microphone echoes; the sentence being spoken is shown and, if wanted, translated as it goes. |
+| `Pipeline/ListenNotes.cs` | Listening: the notes file of a session, written line by line, laid out like the panel (a Markdown table, or padded columns in plain text). |
+| `Pipeline/SpeakerClusters.cs` | Listening: tells speakers apart by voiceprints as lines come (nearest average voiceprint, or a new speaker). |
+| `Pipeline/EchoFilter.cs` | Listening: whether a microphone segment is only the speakers' echo (the system audio explains its loudness), or its words repeat a line from the Mac. |
+| `Pipeline/VoiceModels.cs` | The voice model for telling speakers apart (download link, hash, threshold) and the voiceprint interface the macOS app implements. |
 | `Stt/ISpeechToText.cs` | Speech-to-text interface: warm up, transcribe, unload. |
 | `Stt/WhisperServerStt.cs` | Runs bundled `whisper-server` (Vulkan on Windows, Metal on macOS) on demand and transcribes over HTTP; language detection with an allowed list. |
 | `Stt/RecognitionRouter.cs` | Speech to text through the configured engine (`Recognition.Engine`): local Whisper, Gemini or Groq, falling back to local; builds Gemini's instruction from the language and terms. |
@@ -144,6 +147,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `MenuBarApp.cs` | The app: menu bar item, hotkey → record → pipeline → paste, indicator, grammar check, downloads, updates, idle unload; implements `IAppHost` for the shared windows. |
 | `LaunchAgent.cs` | Start at login via `~/Library/LaunchAgents`. |
 | `Audio/MacAudioRecorder.cs` | AudioQueue microphone capture straight to 16 kHz mono PCM; microphone permission state. |
+| `Audio/Voiceprints.cs` | Listening: voiceprints (speaker embeddings) with sherpa-onnx and the voice model; loaded while listening. |
 | `Audio/SystemAudioTap.cs` | Listening: captures what the Mac plays through a Core Audio process tap (macOS 14.2+), as 16 kHz mono PCM. |
 | `Audio/MacAudioFile.cs` | Decodes audio files with `afconvert` (for `--batch`). |
 | `Input/HotkeyTap.cs` | Push-to-talk hotkey via CGEventTap (needs Accessibility); also records new hotkeys for the main window. |
@@ -156,7 +160,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Ui/Hud.cs` | Shared setup for the floating panels: non-activating, on every desktop and over full-screen apps; logs when macOS keeps one hidden. |
 | `Ui/RecordingOverlay.cs` | Indicator at the bottom: live seconds while recording/processing, then a summary with a Text button; a fresh panel per dictation. |
 | `Ui/PolishPanel.cs` | Grammar check proposal with changed words highlighted; insert, copy or close. |
-| `Ui/ListenPanel.cs` | Listening indicator: elapsed time, language menu, notes and stop buttons, and the session's lines in a scrolling list (translations side by side, the sentence being spoken and its translation greyed); resizable, keeps its size and place. |
+| `Ui/ListenPanel.cs` | Listening indicator: elapsed time, language menu, notes and stop buttons, and the session's lines in a scrolling list (translations side by side, each speaker in its own color, the sentence being spoken and its translation greyed); resizable, keeps its size and place. |
 | `Ui/AutocompletePanel.cs` | Ghost-text panel for autocomplete (shelved). |
 | `Ui/ActionTarget.cs` | One Objective-C object that receives menu and button clicks and dispatches them by tag. |
 | `Ui/Dialogs.cs` | Native alerts, notifications and opening files/URLs. |

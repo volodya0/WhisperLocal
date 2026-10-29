@@ -25,6 +25,9 @@ public interface IAppHost
     /// <summary>Whether the app has the grammar check; without it the main window leaves out the Language model card.</summary>
     bool HasGrammarCheck { get; }
 
+    /// <summary>Listening tells speakers apart with a voice model (macOS): its row on the Models page.</summary>
+    bool HasSpeakerSeparation => false;
+
     /// <summary>Grammar check: the language model (Download, Unload) and its server.</summary>
     IReadOnlyList<SetupItem> GetLanguageModelItems();
 

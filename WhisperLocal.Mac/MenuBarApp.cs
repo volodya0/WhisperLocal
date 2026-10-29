@@ -51,6 +51,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private readonly LiveAutocomplete _liveAutocomplete;
     private readonly Polisher _polisher;
     private readonly SystemAudioTap _systemAudio = new();
+    private readonly MacAudioRecorder _listenMicrophone = new(); // the user, while listening (dictation has its own)
+    private readonly Voiceprints _voiceprints;
     private readonly LiveListener _listener;
     private readonly ListenPanel _listenPanel;
     private readonly MacTextInserter _inserter = new();
@@ -70,6 +72,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private bool _checkingForUpdates;
     private Download? _download;
     private Download? _llmDownload;
+    private Download? _voiceDownload;
+    private bool _microphoneProblemShown; // "listening without your microphone" is said once per run
+    private TimeSpan _microphoneDelay; // how much later than the system audio the microphone started
     private CancellationTokenSource? _liveCompletion;
     private CancellationTokenSource? _polishRequest;
     private (string Original, string Polished, FrontmostApp? Target, long PastedAt)? _proposal;
@@ -104,7 +109,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _autocompleter = new Autocompleter(config, _llama);
         _liveAutocomplete = new LiveAutocomplete(config, _stt, _autocompleter);
         _polisher = new Polisher(config, _llama);
-        _listener = new LiveListener(config, _stt, new Translator(config, _llama));
+        _voiceprints = new Voiceprints(config);
+        _listener = new LiveListener(config, _stt, new Translator(config, _llama), _voiceprints);
         _listenPanel = new ListenPanel(_ui, StopListening, OpenNotes, ChooseListenLanguage, ListenHint);
         _listener.Heard += _listenPanel.ShowLine;
         _listener.Finished += OnListenLineFinished;
@@ -241,6 +247,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
     public bool HasGrammarCheck => true;
 
+    public bool HasSpeakerSeparation => true;
+
     public IReadOnlyList<SetupItem> GetLanguageModelItems()
     {
         var c = _config.Current.LocalLlm;
@@ -327,6 +335,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             };
             loaded.Add((name, uses + (_llama.MemoryBytes is { } bytes ? $" · {FormatSize(bytes)}" : "")));
         }
+        if (_voiceprints.IsLoaded)
+            loaded.Add((VoiceModels.Find(cfg.Listen.VoiceModelPath)?.Title ?? Path.GetFileName(cfg.Listen.VoiceModelPath),
+                "Voice model: telling speakers apart while listening"));
         return loaded;
     }
 
@@ -345,7 +356,10 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     public void DownloadModel(string modelPath, string? url = null)
     {
         var model = AppPaths.Resolve(modelPath);
-        _ = url == null ? DownloadModelAsync(model) : DownloadLlmAsync(model, url);
+        if (VoiceModels.Find(model) is { } voice)
+            _ = DownloadVoiceModelAsync(model, voice);
+        else
+            _ = url == null ? DownloadModelAsync(model) : DownloadLlmAsync(model, url);
     }
 
     public string? DownloadProgress(string modelPath) => FindDownload(modelPath)?.Text;
@@ -355,7 +369,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private Download? FindDownload(string modelPath)
     {
         var model = AppPaths.Resolve(modelPath);
-        return new[] { _download, _llmDownload }.FirstOrDefault(d => d != null && d.Model == model);
+        return new[] { _download, _llmDownload, _voiceDownload }.FirstOrDefault(d => d != null && d.Model == model);
     }
 
     public void CheckForUpdates() => _ = CheckForUpdatesAsync();
@@ -797,14 +811,33 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             return;
         }
 
+        // The user as "Me": without the microphone (denied, no device), listening goes on with what the Mac plays
+        var systemStarted = Stopwatch.GetTimestamp();
+        if (cfg.Listen.IncludeMe)
+        {
+            try
+            {
+                _listenMicrophone.Start(cfg.Audio.DeviceName, 0);
+                _microphoneDelay = Stopwatch.GetElapsedTime(systemStarted);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"Listening without the microphone: {ex.Message}");
+                if (!_microphoneProblemShown)
+                    Dialogs.Notify($"Listening without your microphone: {ex.Message}");
+                _microphoneProblemShown = true;
+            }
+        }
+
         // Translation needs a language model; without one the choice waits until it is downloaded (or a key added)
         var language = CanTranslate ? cfg.Listen.TranslateTo.Trim() : "";
         _listener.TranslateTo = language;
-        _notes = new ListenNotes(NotesFolder, cfg.Notes.Extension);
+        _notes = new ListenNotes(NotesFolder, cfg.Notes.Extension, language.Length > 0);
         var listening = _listening = new CancellationTokenSource();
         _listenStartedAt = Stopwatch.GetTimestamp();
         _lastActivityUtc = DateTime.UtcNow;
-        Log.Info($"Listening started{(language.Length > 0 ? $", translating into {language}" : "")}");
+        Log.Info($"Listening started{(_listenMicrophone.IsRecording ? ", with the microphone" : "")}" +
+                 $"{(language.Length > 0 ? $", translating into {language}" : "")}");
         _listenPanel.Show(cfg.Listen.Languages, language);
         UpdateMenuState();
         _ = WarmUpWhisperAsync();
@@ -817,7 +850,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     {
         try
         {
-            await _listener.RunAsync(_systemAudio.Drain, listening.Token);
+            await _listener.RunAsync(_systemAudio.Drain, _listenMicrophone.IsRecording ? _listenMicrophone.Drain : null, listening.Token,
+                _microphoneDelay);
         }
         catch (Exception ex)
         {
@@ -826,6 +860,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         finally
         {
             _systemAudio.Stop();
+            if (_listenMicrophone.IsRecording)
+                await _listenMicrophone.StopAsync();
+            _voiceprints.Unload();
             _listenPanel.Hide();
             var notes = _notes;
             _notes = null;
@@ -947,12 +984,13 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         DismissProposal();
         _stt.Unload();
         _llama.Unload();
+        _voiceprints.Unload();
         if (_config.Current.Llm.Enabled)
             await _llm.UnloadAsync();
         Log.Info("Unloaded from memory: all servers stopped, models released");
     }
 
-    private bool IsAnythingLoaded => _stt.IsLoaded || _llama.IsLoaded;
+    private bool IsAnythingLoaded => _stt.IsLoaded || _llama.IsLoaded || _voiceprints.IsLoaded;
 
     private async void CheckIdle()
     {
@@ -996,42 +1034,37 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         }
     }
 
-    private async Task DownloadModelAsync(string model)
-    {
-        if (_download != null)
-            return;
-        var download = _download = new Download { Model = model };
-        try
-        {
-            if (await DownloadAsync(model, ModelDownloader.UrlFor(model), download))
-                Dialogs.Notify("Model downloaded, ready to dictate");
-        }
-        finally
-        {
-            _download = null;
-            _mainWindow.Refresh();
-        }
-    }
+    private Task DownloadModelAsync(string model) =>
+        DownloadIntoAsync(() => _download, d => _download = d, model, ModelDownloader.UrlFor(model), null, "Model downloaded, ready to dictate");
 
-    private async Task DownloadLlmAsync(string model, string url)
+    private Task DownloadLlmAsync(string model, string url) =>
+        DownloadIntoAsync(() => _llmDownload, d => _llmDownload = d, model, url, null, "Language model downloaded");
+
+    private Task DownloadVoiceModelAsync(string model, VoiceModel voice) =>
+        DownloadIntoAsync(() => _voiceDownload, d => _voiceDownload = d, model, voice.Url, voice.Sha256,
+            "Voice model downloaded: listening tells speakers apart");
+
+    /// <summary>Downloads into one slot (one download of each kind at a time); <paramref name="done"/> is the notice after.</summary>
+    private async Task DownloadIntoAsync(Func<Download?> slot, Action<Download?> setSlot, string model, string url, string? sha256, string done)
     {
-        if (_llmDownload != null)
+        if (slot() != null)
             return;
-        var download = _llmDownload = new Download { Model = model };
+        var download = new Download { Model = model };
+        setSlot(download);
         try
         {
-            if (await DownloadAsync(model, url, download))
-                Dialogs.Notify("Language model downloaded");
+            if (await DownloadAsync(model, url, sha256, download))
+                Dialogs.Notify(done);
         }
         finally
         {
-            _llmDownload = null;
+            setSlot(null);
             _mainWindow.Refresh();
         }
     }
 
     /// <summary>Downloads <paramref name="model"/>, keeping <see cref="Download.Text"/> up to date; false if cancelled or failed.</summary>
-    private async Task<bool> DownloadAsync(string model, string url, Download download)
+    private async Task<bool> DownloadAsync(string model, string url, string? sha256, Download download)
     {
         var name = Path.GetFileName(model);
         download.Text = $"Downloading {name}…";
@@ -1043,7 +1076,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         try
         {
             await ModelDownloader.DownloadAsync(model, url, progress, () => _ui.Post(_ => download.Text = $"Verifying {name}…", null),
-                download.Cancel.Token);
+                download.Cancel.Token, sha256);
             return true;
         }
         catch (OperationCanceledException)
@@ -1172,10 +1205,13 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _disposed = true;
         _download?.Cancel.Cancel();
         _llmDownload?.Cancel.Cancel();
+        _voiceDownload?.Cancel.Cancel();
         _liveCompletion?.Cancel();
         _polishRequest?.Cancel();
         _listening?.Cancel();
         _systemAudio.Dispose();
+        _listenMicrophone.Dispose();
+        _voiceprints.Dispose();
         _notes?.Close();
         _notes = null;
         _idleTimer.Dispose();

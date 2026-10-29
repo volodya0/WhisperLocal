@@ -132,6 +132,20 @@ internal sealed unsafe class MacAudioRecorder : IDisposable
             return session.Buffer.ToArray();
     }
 
+    /// <summary>What was recorded since the last call (16 kHz mono 16-bit PCM), for listening; empty when not recording.</summary>
+    public byte[] Drain()
+    {
+        var session = _session;
+        if (session == null)
+            return [];
+        lock (session.Sync)
+        {
+            var pcm = session.Buffer.ToArray();
+            session.Buffer.SetLength(0);
+            return pcm;
+        }
+    }
+
     /// <summary>Stops capture and returns 16 kHz mono 16-bit PCM (no WAV header).</summary>
     public Task<byte[]> StopAsync()
     {
