@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Listening panel: resizable by its edges and corners, and the lines scroll: the whole session (its last 300 lines)
+  instead of the last few, following the newest line unless you scrolled up to read. The panel keeps its size and
+  place for the next session.
 - Models → Memory lists the models loaded right now (speech and language model, what uses each and how much memory)
   with one **Unload All** button and the auto-unload time; the separate Load/Unload of the speech model and the
   language model's Unload are gone.

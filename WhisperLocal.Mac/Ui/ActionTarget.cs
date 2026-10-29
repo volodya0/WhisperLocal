@@ -5,11 +5,13 @@ namespace WhisperLocal.Mac.Ui;
 
 /// <summary>
 /// One Objective-C object that receives AppKit callbacks of the native parts: menu item and button clicks
-/// (dispatched by the sender's tag) and the menu delegate. Avalonia owns the application and window delegates.
+/// (dispatched by the sender's tag), the menu delegate and notifications (dispatched by their object). Avalonia owns
+/// the application and window delegates.
 /// </summary>
 internal static class ActionTarget
 {
     private static readonly List<Action> Actions = [];
+    private static readonly Dictionary<IntPtr, Action> Observers = [];
     private static IntPtr _instance;
 
     /// <summary>The selector to use as the action of controls whose target is <see cref="Instance"/>.</summary>
@@ -26,6 +28,7 @@ internal static class ActionTarget
             var cls = objc_allocateClassPair(Class("NSObject"), "WhisperLocalActionTarget", 0);
             class_addMethod(cls, Sel("performAction:"), (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&OnAction, "v@:@");
             class_addMethod(cls, Sel("menuWillOpen:"), (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&OnMenuWillOpen, "v@:@");
+            class_addMethod(cls, Sel("notify:"), (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)&OnNotify, "v@:@");
             objc_registerClassPair(cls);
             _instance = Send(Send(cls, Sel("alloc")), Sel("init"));
             return _instance;
@@ -50,6 +53,25 @@ internal static class ActionTarget
         lock (Actions)
             action = tag >= 0 && tag < Actions.Count ? Actions[(int)tag] : null;
         action?.Invoke();
+    });
+
+    /// <summary>Calls <paramref name="handler"/> on <paramref name="name"/> (e.g. "NSWindowDidResizeNotification") posted by <paramref name="obj"/>.</summary>
+    public static void Observe(IntPtr obj, string name, Action handler)
+    {
+        lock (Observers)
+            Observers[obj] = handler;
+        WithPool(() => Send(Send(Class("NSNotificationCenter"), Sel("defaultCenter")), Sel("addObserver:selector:name:object:"),
+            Instance, Sel("notify:"), Str(name), obj));
+    }
+
+    [UnmanagedCallersOnly]
+    private static void OnNotify(IntPtr self, IntPtr sel, IntPtr notification) => Guard("Notification", () =>
+    {
+        var obj = Send(notification, Sel("object"));
+        Action? handler;
+        lock (Observers)
+            Observers.TryGetValue(obj, out handler);
+        handler?.Invoke();
     });
 
     [UnmanagedCallersOnly]

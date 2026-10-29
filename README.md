@@ -106,7 +106,8 @@ everything the Mac plays. The first time, macOS asks to allow **System Audio
 Recording**; if it was refused, allow WhisperLocal in System Settings → Privacy & Security → Screen & System Audio
 Recording.
 
-A panel above the indicator shows the last sentences, and the one still being spoken greyed at the bottom. Its menu
+A panel above the indicator shows the sentences so far, and the one still being spoken greyed at the bottom; scroll
+up to read earlier ones, and drag its edges to make it larger. It keeps its size and place for the next time. Its menu
 translates them: **Original**, or a language such as Українська or English; the translation then stands next to each
 sentence. When translated, every line is written in both languages. The translation uses the local language model,
 so download one on the **Models** page first. The language you pick is remembered.

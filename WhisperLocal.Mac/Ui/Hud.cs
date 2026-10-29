@@ -11,7 +11,10 @@ namespace WhisperLocal.Mac.Ui;
 internal static class Hud
 {
     private const ulong NSWindowStyleMaskBorderless = 0;
+    private const ulong NSWindowStyleMaskTitled = 1 << 0;
+    private const ulong NSWindowStyleMaskResizable = 1 << 3;
     private const ulong NSWindowStyleMaskNonactivatingPanel = 1 << 7;
+    private const ulong NSWindowStyleMaskFullSizeContentView = 1 << 15;
     private const ulong NSBackingStoreBuffered = 2;
     private const long NSStatusWindowLevel = 25;
     private const long CanJoinAllSpaces = 1 << 0, Stationary = 1 << 4, IgnoresCycle = 1 << 6, FullScreenAuxiliary = 1 << 8;
@@ -20,10 +23,29 @@ internal static class Hud
     private const ulong NSWindowOcclusionStateVisible = 1 << 1;
 
     /// <summary>A dark rounded panel; returns it and the background colour to release with it.</summary>
-    public static (IntPtr Panel, IntPtr Background) CreatePanel(double width, double height, double alpha)
+    /// <param name="resizable">
+    /// Resizable by its edges and corners: a titled panel whose (invisible) title bar the content covers, since macOS
+    /// resizes only windows with a frame.
+    /// </param>
+    public static (IntPtr Panel, IntPtr Background) CreatePanel(double width, double height, double alpha, bool resizable = false)
     {
+        var style = resizable
+            ? NSWindowStyleMaskTitled | NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView | NSWindowStyleMaskNonactivatingPanel
+            : NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel;
         var panel = Send(Send(Class("NSPanel"), Sel("alloc")), Sel("initWithContentRect:styleMask:backing:defer:"),
-            new NSRect(0, 0, width, height), NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel, NSBackingStoreBuffered, false);
+            new NSRect(0, 0, width, height), style, NSBackingStoreBuffered, false);
+        if (resizable)
+        {
+            Send(panel, Sel("setTitlebarAppearsTransparent:"), true);
+            Send(panel, Sel("setTitleVisibility:"), 1L); // NSWindowTitleHidden
+            for (long button = 0; button <= 2; button++) // close, minimize, zoom
+                Send(Send(panel, Sel("standardWindowButton:"), button), Sel("setHidden:"), true);
+            // The title bar's container lies over the top of the content and would take the clicks meant for controls
+            // there; hidden, it takes none (resizing is done by the window frame, not the title bar)
+            var titlebar = Send(Send(Send(panel, Sel("standardWindowButton:"), 0L), Sel("superview")), Sel("superview"));
+            if (titlebar != IntPtr.Zero)
+                Send(titlebar, Sel("setHidden:"), true);
+        }
         Send(panel, Sel("setReleasedWhenClosed:"), false);
         Send(panel, Sel("setHidesOnDeactivate:"), false);
         Send(panel, Sel("setBecomesKeyOnlyIfNeeded:"), true);
@@ -46,6 +68,23 @@ internal static class Hud
         Send(layer, Sel("setCornerRadius:"), 10.0);
         return (panel, background);
     }
+
+    private static IntPtr _flippedViewClass;
+
+    /// <summary>A plain view whose y axis points down (top-down layout, as in a list), owned by the caller.</summary>
+    public static unsafe IntPtr FlippedView(NSRect frame)
+    {
+        if (_flippedViewClass == IntPtr.Zero)
+        {
+            _flippedViewClass = objc_allocateClassPair(Class("NSView"), "WhisperLocalFlippedView", 0);
+            class_addMethod(_flippedViewClass, Sel("isFlipped"), (IntPtr)(delegate* unmanaged<IntPtr, IntPtr, byte>)&IsFlipped, "c@:");
+            objc_registerClassPair(_flippedViewClass);
+        }
+        return Send(Send(_flippedViewClass, Sel("alloc")), Sel("initWithFrame:"), frame);
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte IsFlipped(IntPtr self, IntPtr sel) => 1;
 
     /// <summary>
     /// Visible frame (without menu bar and Dock) of the screen you are working on: the one with the focused window

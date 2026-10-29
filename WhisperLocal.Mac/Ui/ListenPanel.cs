@@ -7,25 +7,27 @@ using static WhisperLocal.Mac.Interop.ObjC;
 namespace WhisperLocal.Mac.Ui;
 
 /// <summary>
-/// The listening indicator, just above the recording indicator: elapsed time, a menu to choose the translation
-/// language, buttons to open the notes and to stop, and the last lines heard, with the sentence still being spoken greyed
-/// at the bottom. While translating, the original and its translation stand side by side, row by row; new lines and
-/// translations fade in. Stays until stopped; can be dragged
-/// anywhere. Never takes focus, so the app you are in stays active.
+/// The listening indicator, first just above the recording indicator: elapsed time, a menu to choose the translation
+/// language, buttons to open the notes and to stop, and below them the session's lines in a scrolling list, with the
+/// sentence still being spoken greyed at the end. While translating, the original and its translation stand side by
+/// side, row by row; new lines and translations fade in. New lines scroll into view unless you scrolled up to read.
+/// Resizable by its edges, movable by its background; keeps its size and place for the next session. Stays until
+/// stopped. Never takes focus, so the app you are in stays active.
 /// </summary>
 internal sealed class ListenPanel : IDisposable
 {
     private const double Width = 720;
+    private const double Height = 170;
+    private const double MinWidth = 420;
+    private const double MinHeight = 110;
     private const double Padding = 12;
     private const double HeaderHeight = 24;
-    private const double TextHeight = 116;
-    private const double Height = Padding + TextHeight + 8 + HeaderHeight + Padding;
     private const double ColumnGap = 20;
     private const double RowGap = 6;
     private const double PopupWidth = 150;
     private const double ButtonSize = 24;
     private const double IndicatorSpace = 40 + 36 + 8; // the recording indicator sits 40 pt above the bottom, 36 pt tall
-    private const int MaxRows = 6;
+    private const int MaxLines = 300; // the panel's history; the notes file keeps everything
     private const double FadeSeconds = 0.35;
 
     private static readonly (double R, double G, double B) Red = (1.0, 0.35, 0.35);
@@ -45,8 +47,9 @@ internal sealed class ListenPanel : IDisposable
     private readonly IntPtr _status;
     private readonly IntPtr _popup;
     private readonly IntPtr[] _buttons;
-    private readonly IntPtr _rowsView;
-    private readonly Row[] _rows;
+    private readonly IntPtr _scroll;
+    private readonly IntPtr _list; // the scroll view's document: rows top to bottom
+    private readonly List<Row> _rows = [];
     private readonly System.Threading.Timer _timer;
     private readonly List<ListenLine> _lines = [];
 
@@ -56,6 +59,7 @@ internal sealed class ListenPanel : IDisposable
     private bool _finishing;
     private string? _problem;
     private string? _provisional;
+    private bool _placed;
 
     /// <param name="chooseLanguage">Gets the chosen code ("" for the original); false keeps the previous choice.</param>
     /// <param name="hint">Shown instead of the text while nothing was heard yet (e.g. a permission hint), or null.</param>
@@ -64,20 +68,19 @@ internal sealed class ListenPanel : IDisposable
         _ui = ui;
         _chooseLanguage = chooseLanguage;
         _hint = hint;
-        (_panel, _background) = Hud.CreatePanel(Width, Height, 0.92);
+        (_panel, _background) = Hud.CreatePanel(Width, Height, 0.92, resizable: true);
         Send(_panel, Sel("setIgnoresMouseEvents:"), false);
         Send(_panel, Sel("setMovableByWindowBackground:"), true);
+        Send(_panel, Sel("setMinSize:"), new NSSize(MinWidth, MinHeight));
         var content = Send(_panel, Sel("contentView"));
 
-        var top = Height - Padding - HeaderHeight;
         _status = Retain(Send(Class("NSTextField"), Sel("labelWithString:"), Str("")));
         Send(_status, Sel("setFont:"), Send(Class("NSFont"), Sel("monospacedDigitSystemFontOfSize:weight:"), 13.0, 0.3)); // semibold
         Send(_status, Sel("setLineBreakMode:"), 4L); // truncate tail
-        Send(_status, Sel("setFrame:"), new NSRect(Padding + 2, top + 3, Width - Padding * 2 - PopupWidth - 2 * ButtonSize - 16, 18));
         Send(content, Sel("addSubview:"), _status);
 
         _popup = Retain(Send(Send(Class("NSPopUpButton"), Sel("alloc")), Sel("initWithFrame:pullsDown:"),
-            new NSRect(Width - Padding - 2 * ButtonSize - 8 - PopupWidth, top, PopupWidth, HeaderHeight), false));
+            new NSRect(0, 0, PopupWidth, HeaderHeight), false));
         Send(_popup, Sel("setControlSize:"), 1L); // NSControlSizeSmall
         Send(_popup, Sel("setFont:"), Send(Class("NSFont"), Sel("systemFontOfSize:"), 12.0));
         Send(_popup, Sel("setToolTip:"), Str("Translate into"));
@@ -91,23 +94,27 @@ internal sealed class ListenPanel : IDisposable
             PolishPanel.IconButton("folder", "Notes", "Open the notes", openNotes),
             PolishPanel.IconButton("stop.circle", "Stop", "Stop listening and save the notes", stop),
         ];
-        for (var i = 0; i < _buttons.Length; i++)
-        {
-            Send(_buttons[i], Sel("setFrame:"), new NSRect(Width - Padding - (_buttons.Length - i) * (ButtonSize + 4) + 4, top, ButtonSize, ButtonSize));
-            Send(content, Sel("addSubview:"), _buttons[i]);
-        }
+        foreach (var button in _buttons)
+            Send(content, Sel("addSubview:"), button);
 
-        // The rows live in their own layer-backed view, so a fade covers exactly the text area
-        _rowsView = Send(Send(Class("NSView"), Sel("alloc")), Sel("initWithFrame:"), new NSRect(Padding, Padding, Width - Padding * 2, TextHeight));
-        Send(_rowsView, Sel("setWantsLayer:"), true);
-        Send(content, Sel("addSubview:"), _rowsView);
-        _rows = new Row[MaxRows];
-        for (var i = 0; i < MaxRows; i++)
+        // The lines scroll; the scroller shows only while scrolling (overlay style)
+        _scroll = Send(Send(Class("NSScrollView"), Sel("alloc")), Sel("initWithFrame:"), new NSRect(0, 0, 100, 100));
+        Send(_scroll, Sel("setDrawsBackground:"), false);
+        Send(_scroll, Sel("setHasVerticalScroller:"), true);
+        Send(_scroll, Sel("setAutohidesScrollers:"), true);
+        Send(_scroll, Sel("setScrollerStyle:"), 1L); // NSScrollerStyleOverlay
+        Send(_scroll, Sel("setWantsLayer:"), true);
+        _list = Hud.FlippedView(new NSRect(0, 0, 100, 100));
+        Send(_list, Sel("setWantsLayer:"), true);
+        Send(_scroll, Sel("setDocumentView:"), _list);
+        Send(content, Sel("addSubview:"), _scroll);
+
+        ActionTarget.Observe(_panel, "NSWindowDidResizeNotification", () =>
         {
-            _rows[i] = new Row(Label(), Label());
-            Send(_rowsView, Sel("addSubview:"), _rows[i].Original);
-            Send(_rowsView, Sel("addSubview:"), _rows[i].Translation);
-        }
+            Layout();
+            Render(fadeIn: null);
+        });
+        Layout();
 
         _timer = new System.Threading.Timer(_ => _ui.Post(_ => Tick(), null), null, Timeout.Infinite, Timeout.Infinite);
     }
@@ -134,10 +141,20 @@ internal sealed class ListenPanel : IDisposable
         SelectLanguage();
         Send(_popup, Sel("setEnabled:"), true);
 
+        // The first time above the recording indicator; afterwards where (and as large as) the user left it
+        NSRect frame;
+        if (_placed)
+            frame = SendRect(_panel, Sel("frame"));
+        else
+        {
+            var area = Hud.ActiveScreen();
+            frame = new NSRect(area.X + (area.Width - Width) / 2, area.Y + IndicatorSpace, Width, Height);
+            _placed = true;
+        }
+        Hud.Show(_panel, frame, "Listening indicator");
+        Layout();
         Tick();
         Render(fadeIn: null);
-        var area = Hud.ActiveScreen();
-        Hud.Show(_panel, new NSRect(area.X + (area.Width - Width) / 2, area.Y + IndicatorSpace, Width, Height), "Listening indicator");
         IsVisible = true;
         _timer.Change(1000, 1000);
     }
@@ -156,11 +173,11 @@ internal sealed class ListenPanel : IDisposable
         if (isNew)
         {
             _lines.Add(line);
-            if (_lines.Count > MaxRows)
+            if (_lines.Count > MaxLines)
                 _lines.RemoveAt(0);
             _problem = null;
         }
-        Render(fadeIn: isNew ? _rowsView : null, line);
+        Render(fadeIn: line, translationOnly: !isNew);
     }
 
     /// <summary>The sentence being spoken so far, greyed under the lines; null removes it.</summary>
@@ -203,7 +220,7 @@ internal sealed class ListenPanel : IDisposable
         if (code != _language && _chooseLanguage(code))
         {
             _language = code;
-            Render(fadeIn: _rowsView); // one column or two
+            Render(fadeIn: null); // one column or two
         }
         SelectLanguage();
     }
@@ -231,58 +248,49 @@ internal sealed class ListenPanel : IDisposable
         Send(_status, Sel("setTextColor:"), Color(color));
     }
 
-    /// <summary>
-    /// The newest lines that fit, newest at the bottom; with a translation language, each line on the left and its
-    /// translation on the right, the row as tall as the longer of the two.
-    /// </summary>
-    /// <param name="fadeIn">The view whose change fades in (the whole text area for a new line), or null.</param>
-    /// <param name="updated">A line whose translation just came: its translation fades in.</param>
-    private void Render(IntPtr? fadeIn, ListenLine? updated = null)
+    /// <summary>Places the header (status left; menu and buttons right) and the list below it for the panel's size.</summary>
+    private void Layout()
     {
-        if (fadeIn is { } view)
-            Fade(view);
+        var size = SendRect(Send(_panel, Sel("contentView")), Sel("bounds"));
+        var top = size.Height - Padding - HeaderHeight;
+        var right = size.Width - Padding;
+        for (var i = 0; i < _buttons.Length; i++)
+            Send(_buttons[i], Sel("setFrame:"), new NSRect(right - (_buttons.Length - i) * (ButtonSize + 4) + 4, top, ButtonSize, ButtonSize));
+        var popupX = right - _buttons.Length * (ButtonSize + 4) - 4 - PopupWidth;
+        Send(_popup, Sel("setFrame:"), new NSRect(popupX, top, PopupWidth, HeaderHeight));
+        Send(_status, Sel("setFrame:"), new NSRect(Padding + 2, top + 3, Math.Max(40, popupX - Padding - 10), 18));
+        Send(_scroll, Sel("setFrame:"), new NSRect(Padding, Padding, size.Width - Padding * 2, Math.Max(20, top - 8 - Padding)));
+    }
 
+    /// <summary>
+    /// All lines top to bottom, then the sentence being spoken; with a translation language, each line on the left
+    /// and its translation on the right, the row as tall as the longer of the two. While they fit, they sit at the
+    /// bottom of the list, like subtitles. Keeps following the newest line if the list was scrolled to the end.
+    /// </summary>
+    /// <param name="fadeIn">A line that just came (or, with <paramref name="translationOnly"/>, just got its translation).</param>
+    private void Render(ListenLine? fadeIn, bool translationOnly = false)
+    {
+        var clip = Send(_scroll, Sel("contentView"));
+        var visible = SendRect(clip, Sel("bounds"));
+        var oldHeight = SendRect(_list, Sel("frame")).Height;
+        var followEnd = visible.Y + visible.Height >= oldHeight - 4;
+
+        var width = visible.Width;
         var twoColumns = _language.Length > 0 || _lines.Any(l => l.Translation != null);
-        var full = Width - Padding * 2;
-        var column = twoColumns ? (full - ColumnGap) / 2 : full;
+        var column = twoColumns ? (width - ColumnGap) / 2 : width;
 
-        var used = 0;
-        var y = 0.0;
-        if (_provisional != null)
+        // Measure first, then place: the rows go to the bottom while the content is shorter than the view
+        var placed = new List<(Row Row, double Height, bool Translation)>();
+        if (_lines.Count == 0 && _provisional == null)
         {
-            // The newest text of all: always shown; when long, only its end, so the lines above stay in view
-            var row = _rows[0];
-            var text = _provisional;
-            SetText(row.Original, text, MutedColor);
-            var height = Measure(row.Original, column);
-            while (height > TextHeight / 2 && text.IndexOf(' ', 1) is var space and > 0)
-            {
-                text = text[(space + 1)..];
-                SetText(row.Original, "…" + text, MutedColor);
-                height = Measure(row.Original, column);
-            }
-            height = Math.Min(height, TextHeight);
-            Send(row.Original, Sel("setFrame:"), new NSRect(0, 0, column, height));
-            Send(row.Original, Sel("setHidden:"), false);
-            Send(row.Translation, Sel("setHidden:"), true);
-            y = height + RowGap;
-            used = 1;
-        }
-        else if (_lines.Count == 0)
-        {
-            var row = _rows[0];
+            var row = RowAt(0);
             SetText(row.Original, _hint() ?? "Listening to what the Mac plays…", MutedColor);
-            var height = Math.Min(Measure(row.Original, full), TextHeight);
-            Send(row.Original, Sel("setFrame:"), new NSRect(0, TextHeight - height, full, height));
-            Send(row.Original, Sel("setHidden:"), false);
-            Send(row.Translation, Sel("setHidden:"), true);
-            used = 1;
+            placed.Add((row, Measure(row.Original, width), false));
         }
-
-        for (var i = _lines.Count - 1; i >= 0 && used < MaxRows; i--)
+        for (var i = 0; i < _lines.Count; i++)
         {
             var line = _lines[i];
-            var row = _rows[used];
+            var row = RowAt(placed.Count);
             SetText(row.Original, line.Text, TextColor);
             var height = Measure(row.Original, column);
             if (twoColumns)
@@ -291,26 +299,53 @@ internal sealed class ListenPanel : IDisposable
                 SetText(row.Translation, line.Translation ?? (pending ? "…" : ""), pending ? MutedColor : TranslationColor);
                 height = Math.Max(height, Measure(row.Translation, column));
             }
-            // The newest line always shows, cut at the top if it is very long
-            if (y + height > TextHeight && used > 0)
-                break;
-            height = Math.Min(height, TextHeight - y);
-
-            Send(row.Original, Sel("setFrame:"), new NSRect(0, y, column, height));
-            Send(row.Translation, Sel("setFrame:"), new NSRect(column + ColumnGap, y, column, height));
-            Send(row.Original, Sel("setHidden:"), false);
-            Send(row.Translation, Sel("setHidden:"), !twoColumns);
-            if (line == updated && fadeIn == null)
+            placed.Add((row, height, twoColumns));
+            if (line == fadeIn)
+                Fade(translationOnly ? row.Translation : row.Original);
+            if (line == fadeIn && !translationOnly && twoColumns)
                 Fade(row.Translation);
-            y += height + RowGap;
-            used++;
+        }
+        if (_provisional != null)
+        {
+            var row = RowAt(placed.Count);
+            SetText(row.Original, _provisional, MutedColor);
+            placed.Add((row, Measure(row.Original, column), false));
         }
 
-        for (var i = used; i < MaxRows; i++)
+        var content = placed.Sum(p => p.Height) + RowGap * Math.Max(0, placed.Count - 1);
+        var height2 = Math.Max(content, visible.Height);
+        Send(_list, Sel("setFrameSize:"), new NSSize(width, height2));
+        var y = height2 - content; // flipped: 0 is the top
+        foreach (var (row, height, translation) in placed)
+        {
+            var full = _lines.Count == 0 && _provisional == null;
+            Send(row.Original, Sel("setFrame:"), new NSRect(0, y, full ? width : column, height));
+            Send(row.Translation, Sel("setFrame:"), new NSRect(column + ColumnGap, y, column, height));
+            Send(row.Original, Sel("setHidden:"), false);
+            Send(row.Translation, Sel("setHidden:"), !translation);
+            y += height + RowGap;
+        }
+        for (var i = placed.Count; i < _rows.Count; i++)
         {
             Send(_rows[i].Original, Sel("setHidden:"), true);
             Send(_rows[i].Translation, Sel("setHidden:"), true);
         }
+
+        if (followEnd)
+            Send(_list, Sel("scrollPoint:"), new NSPoint(0, Math.Max(0, height2 - visible.Height)));
+    }
+
+    /// <summary>The <paramref name="index"/>-th row's labels, created the first time they are needed.</summary>
+    private Row RowAt(int index)
+    {
+        while (_rows.Count <= index)
+        {
+            var row = new Row(Label(), Label());
+            Send(_list, Sel("addSubview:"), row.Original);
+            Send(_list, Sel("addSubview:"), row.Translation);
+            _rows.Add(row);
+        }
+        return _rows[index];
     }
 
     /// <summary>The next change of <paramref name="view"/>'s content cross-fades instead of switching at once.</summary>
@@ -359,7 +394,8 @@ internal sealed class ListenPanel : IDisposable
             Release(row.Original);
             Release(row.Translation);
         }
-        Release(_rowsView);
+        Release(_list);
+        Release(_scroll);
         Release(_popup);
         Release(_status);
         Release(_panel);
