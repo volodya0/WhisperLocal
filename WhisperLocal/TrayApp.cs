@@ -129,7 +129,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
 
         if (_mainWindow.HasProblems)
             ShowMainWindow();
-        else if (config.Current.Whisper.StartOnLaunch && !RecognitionRouter.UsesGemini(config.Current))
+        else if (config.Current.Whisper.StartOnLaunch && !RecognitionRouter.UsesCloud(config.Current))
             _ = WarmUpWhisperAsync();
     }
 
@@ -174,8 +174,8 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
             items.Add(new SetupItem(SetupState.Ok, $"Model: {name} ({FormatSize(new FileInfo(model).Length)})",
                 "Show Folder", () => OpenPath(Path.GetDirectoryName(model)!)));
         else
-            // With Gemini the local model is only the fallback
-            items.Add(new SetupItem(RecognitionRouter.UsesGemini(_config.Current) ? SetupState.Warning : SetupState.Error,
+            // With a cloud engine the local model is only the fallback
+            items.Add(new SetupItem(RecognitionRouter.UsesCloud(_config.Current) ? SetupState.Warning : SetupState.Error,
                 $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
 
         items.Add(new SetupItem(SetupState.Ok, $"Hotkey: hold {KeyboardHook.Describe(_config.Current.Hotkey.Key)} to dictate"));
@@ -326,7 +326,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
 
         // Do not let the user dictate for nothing: the main window has the Download button
         var modelPath = AppPaths.Resolve(cfg.Whisper.ModelPath);
-        if (!File.Exists(modelPath) && !RecognitionRouter.UsesGemini(cfg))
+        if (!File.Exists(modelPath) && !RecognitionRouter.UsesCloud(cfg))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
             ShowModelMissing(new ModelNotFoundException(modelPath));

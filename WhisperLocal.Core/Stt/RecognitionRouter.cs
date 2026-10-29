@@ -4,42 +4,60 @@ using WhisperLocal.Config;
 namespace WhisperLocal.Stt;
 
 /// <summary>
-/// Speech to text through the engine chosen in the config (Recognition.Engine): local Whisper, or Google Gemini with
-/// the user's key, falling back to local Whisper when the cloud fails. Loading and unloading concern only the local
-/// model; with Gemini it is not loaded in advance.
+/// Speech to text through the engine chosen in the config (Recognition.Engine): local Whisper, Google Gemini or Whisper
+/// on Groq with the user's key, falling back to local Whisper when the cloud fails. Loading and unloading concern only
+/// the local model; with a cloud engine it is not loaded in advance.
 /// </summary>
 public sealed class RecognitionRouter(ConfigManager config, ISpeechToText local) : ISpeechToText
 {
     private DateTime _lastCloudUtc = DateTime.MinValue;
 
     /// <summary>Gemini is chosen and has a key.</summary>
-    public static bool UsesGemini(AppConfig c) =>
-        string.Equals(c.Recognition.Engine, "Gemini", StringComparison.OrdinalIgnoreCase) && c.Cloud.GeminiApiKey.Trim().Length > 0;
+    public static bool UsesGemini(AppConfig c) => IsEngine(c, "Gemini") && c.Cloud.GeminiApiKey.Trim().Length > 0;
+
+    /// <summary>Groq is chosen and has a key.</summary>
+    public static bool UsesGroq(AppConfig c) => IsEngine(c, "Groq") && c.Cloud.GroqApiKey.Trim().Length > 0;
+
+    /// <summary>A cloud engine is chosen and has a key, so recordings leave the computer.</summary>
+    public static bool UsesCloud(AppConfig c) => UsesGemini(c) || UsesGroq(c);
+
+    /// <summary>"Gemini" or "Groq" when that cloud engine is in use, otherwise null.</summary>
+    public static string? CloudName(AppConfig c) => UsesGemini(c) ? "Gemini" : UsesGroq(c) ? "Groq" : null;
+
+    public static bool IsEngine(AppConfig c, string engine) => string.Equals(c.Recognition.Engine, engine, StringComparison.OrdinalIgnoreCase);
 
     public bool IsLoaded => local.IsLoaded;
 
     public DateTime LastUsedUtc => local.LastUsedUtc > _lastCloudUtc ? local.LastUsedUtc : _lastCloudUtc;
 
-    public Task WarmUpAsync(CancellationToken ct) => UsesGemini(config.Current) ? Task.CompletedTask : local.WarmUpAsync(ct);
+    public Task WarmUpAsync(CancellationToken ct) => UsesCloud(config.Current) ? Task.CompletedTask : local.WarmUpAsync(ct);
 
-    /// <remarks>The language and prompt overrides reach local recognition only; Gemini follows the config.</remarks>
+    /// <remarks>The language and prompt overrides reach local recognition only; the cloud follows the config.</remarks>
     public async Task<string> TranscribeAsync(byte[] wav, CancellationToken ct, string? language = null, string? prompt = null)
     {
         var c = config.Current;
-        if (!UsesGemini(c))
+        var cloud = CloudName(c);
+        if (cloud == null)
             return await local.TranscribeAsync(wav, ct, language, prompt);
 
         _lastCloudUtc = DateTime.UtcNow;
+        var timeout = TimeSpan.FromSeconds(Math.Max(5, c.Cloud.TimeoutSec));
         try
         {
+            if (cloud == "Groq")
+            {
+                var groqText = await GroqClient.TranscribeAsync(c.Cloud.GroqApiKey.Trim(), c.Cloud.GroqModel, wav, c.Whisper, timeout, ct);
+                Log.Debug($"Groq ({c.Cloud.GroqModel}) transcribed {wav.Length / 1024} KB");
+                return groqText;
+            }
             var text = await GeminiClient.TranscribeAsync(c.Cloud.GeminiApiKey.Trim(), c.Cloud.GeminiModel, wav, Instruction(c.Whisper),
-                TimeSpan.FromSeconds(Math.Max(5, c.Cloud.TimeoutSec)), ct);
+                timeout, ct);
             Log.Debug($"Gemini ({c.Cloud.GeminiModel}) transcribed {wav.Length / 1024} KB");
             return text;
         }
-        catch (GeminiException ex) when (c.Recognition.FallbackToLocal)
+        catch (CloudException ex) when (c.Recognition.FallbackToLocal)
         {
-            Log.Warn($"Gemini recognition failed ({ex.Message}), transcribing locally");
+            Log.Warn($"{cloud} recognition failed ({ex.Message}), transcribing locally");
             return await local.TranscribeAsync(wav, ct, language, prompt);
         }
     }

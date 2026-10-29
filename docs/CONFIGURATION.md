@@ -31,8 +31,8 @@ relative to the data folder.
 | `Hotkey.SuppressKey` | Swallow the hotkey so the app you type in does not see it. |
 | `Audio.DeviceName` | Part of the microphone name; empty = the system default. |
 | `Audio.MaxDurationSec` | A recording stops by itself after this long. |
-| `Recognition.Engine` | `"Local"` (Whisper on this computer, the default) or `"Gemini"`: recordings are sent to Google's Gemini API with `Cloud.GeminiApiKey`. `Whisper.Language` and `Whisper.InitialPrompt` (the terms) apply to Gemini too. |
-| `Recognition.FallbackToLocal` | When Gemini fails (no internet, limit used up, timeout), transcribe the recording locally instead (default `true`). |
+| `Recognition.Engine` | `"Local"` (Whisper on this computer, the default), `"Gemini"`: recordings are sent to Google's Gemini API with `Cloud.GeminiApiKey`, or `"Groq"`: recordings are sent to Whisper on Groq's API with `Cloud.GroqApiKey`. `Whisper.Language` and `Whisper.InitialPrompt` (the terms) apply to the cloud too. |
+| `Recognition.FallbackToLocal` | When the cloud fails (no internet, limit used up, timeout), transcribe the recording locally instead (default `true`). |
 | `Whisper.ModelPath` | The speech model file: `models/ggml-large-v3-turbo.bin` (Windows default) or `models/ggml-large-v3.bin` (macOS default, the most accurate). |
 | `Whisper.Language` | `"uk,en"` (detected per dictation, the default), `"uk,en,ru"`, `"uk"`, `"en"`, `"auto"`, or any list of language codes; the first one is the fallback. A single language makes speech in another language come out translated into it. |
 | `Whisper.ExtraArgs` | Extra `whisper-server` arguments. Windows default `-dev 0 -sns -t 8` (GPU index, suppress non-speech tokens, threads); add `-bs 5` for beam search (a bit more accurate, a bit slower). |
@@ -45,7 +45,9 @@ relative to the data folder.
 | `Notes.Extension` | File type of notes made with New Note: `".md"` (default) or `".txt"`. |
 | `Cloud.GeminiApiKey` | Your Google Gemini API key (from [Google AI Studio](https://aistudio.google.com/apikey)); set on the Models page, kept here as plain text. |
 | `Cloud.GeminiModel` | Gemini model for recognition: `gemini-flash-latest` (default) or `gemini-flash-lite-latest` (faster), or any Gemini model id that accepts audio. |
-| `Cloud.TimeoutSec` | A Gemini request taking longer is given up (default 30). |
+| `Cloud.GroqApiKey` | Your Groq API key (from the [Groq console](https://console.groq.com/keys)); set on the Models page, kept here as plain text. |
+| `Cloud.GroqModel` | Whisper model on Groq: `whisper-large-v3-turbo` (default, faster) or `whisper-large-v3` (most accurate). |
+| `Cloud.TimeoutSec` | A cloud request taking longer is given up (default 30). |
 | `Ui.ShowOverlay` | Show the indicator at the bottom of the screen. |
 | `Ui.ResultSeconds` | How long the indicator shows a dictation's summary. |
 | `Logging.LogText` | Keep the text of each dictation in the log and the history (on by default). |

@@ -214,17 +214,18 @@ internal sealed class NotesSettingsPage : Page
         _updating = false;
     }
 
-    /// <summary>Which speech model listening hears with: the local one set up in Speech to Text, even when dictation uses Gemini.</summary>
+    /// <summary>Which speech model listening hears with: the local one set up in Speech to Text, even when dictation uses the cloud.</summary>
     private void RefreshSpeechModel(AppConfig cfg)
     {
         var path = cfg.Whisper.ModelPath;
         var name = WhisperModels.Find(path)?.Title ?? Path.GetFileName(path);
         var ready = File.Exists(AppPaths.Resolve(path));
-        _speechModel.Text = (RecognitionRouter.UsesGemini(cfg), ready) switch
+        var cloud = RecognitionRouter.CloudName(cfg);
+        _speechModel.Text = (cloud != null, ready) switch
         {
             (false, true) => $"Speech is recognised with {name}, the model set in Speech to Text; changing it there changes it here.",
             (true, true) => $"Speech is recognised on this computer with {name}, the local model set in Speech to Text " +
-                            "(dictation uses Gemini; listening never sends audio to the cloud).",
+                            $"(dictation uses {cloud}; listening never sends audio to the cloud).",
             _ => $"Speech is recognised with {name}, the local model set in Speech to Text: it is not downloaded yet.",
         };
         _speechModel.Foreground = ready ? DarkTheme.Muted : DarkTheme.Warning;

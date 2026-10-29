@@ -167,7 +167,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
         if (_mainWindow.HasProblems)
             ShowMainWindow();
-        else if (config.Current.Whisper.StartOnLaunch && !RecognitionRouter.UsesGemini(config.Current))
+        else if (config.Current.Whisper.StartOnLaunch && !RecognitionRouter.UsesCloud(config.Current))
             _ = WarmUpWhisperAsync();
     }
 
@@ -222,8 +222,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             items.Add(new SetupItem(SetupState.Ok, $"Model: {name} ({FormatSize(new FileInfo(model).Length)})",
                 "Show Folder", () => Dialogs.Open(Path.GetDirectoryName(model)!)));
         else
-            // With Gemini the local model is only the fallback
-            items.Add(new SetupItem(RecognitionRouter.UsesGemini(_config.Current) ? SetupState.Warning : SetupState.Error,
+            // With a cloud engine the local model is only the fallback
+            items.Add(new SetupItem(RecognitionRouter.UsesCloud(_config.Current) ? SetupState.Warning : SetupState.Error,
                 $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
 
         var hotkey = HotkeyTap.Describe(_config.Current.Hotkey.Key);
@@ -461,7 +461,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
         // Do not let the user dictate for nothing
         var modelPath = AppPaths.Resolve(cfg.Whisper.ModelPath);
-        if (!File.Exists(modelPath) && !RecognitionRouter.UsesGemini(cfg))
+        if (!File.Exists(modelPath) && !RecognitionRouter.UsesCloud(cfg))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
             ShowModelMissing(new ModelNotFoundException(modelPath));

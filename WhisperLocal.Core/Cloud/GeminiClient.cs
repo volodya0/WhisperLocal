@@ -137,5 +137,8 @@ public static class GeminiClient
     public static string Mask(string key) => key.Length <= 8 ? "••••" : $"{key[..4]}…{key[^3..]}";
 }
 
+/// <summary>A cloud recognition request failed: an error answer, nothing usable, or not in time.</summary>
+public class CloudException(string message) : Exception(message);
+
 /// <summary>Gemini answered with an error, nothing usable, or not in time.</summary>
-public sealed class GeminiException(string message) : Exception(message);
+public sealed class GeminiException(string message) : CloudException(message);

@@ -29,7 +29,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 1. **Hotkey down**: `KeyboardHook` (Windows) / `HotkeyTap` (macOS) fires; the tray app remembers the foreground
    app and starts recording (`AudioRecorder` / `MacAudioRecorder`). The indicator shows "Recording".
 2. **Hotkey up**: recording stops and yields 16 kHz mono 16-bit PCM.
-3. **Pipeline** (`DictationPipeline`): WAV → `RecognitionRouter` → `WhisperServerStt` (starts `whisper-server` on demand) or Gemini →
+3. **Pipeline** (`DictationPipeline`): WAV → `RecognitionRouter` → `WhisperServerStt` (starts `whisper-server` on demand), Gemini or Groq →
    `TextFilters` (hallucination removal, dictionary replacements) → optional `OllamaCleaner`.
 4. **Insert**: `TextInserter` / `MacTextInserter` puts the text on the clipboard and sends Ctrl+V / Cmd+V to
    the remembered app. On macOS, if no text field is focused, the transcript window opens instead.
@@ -76,13 +76,14 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Pipeline/DictationHistory.cs` | Last 1000 dictations with timings, in `history.jsonl`. |
 | `Pipeline/DictationStats.cs` | Lifetime statistics (today / 7 / 30 days / all time) in `stats.json`. |
 | `Cloud/GeminiClient.cs` | Google Gemini API with the user's key: checks that a key works; transcribes a recording (generateContent with the audio inline). |
+| `Cloud/GroqClient.cs` | Groq API (OpenAI-compatible) with the user's key: checks that a key works; transcribes a recording with Whisper on Groq, following `Whisper.Language` like local recognition. |
 | `Notes/NoteFiles.cs` | The notes folder: lists `.md`/`.txt` files newest first with their first line, creates new notes. |
 | `Pipeline/LiveAutocomplete.cs` | Autocomplete loop while the hotkey is held (shelved). |
 | `Pipeline/LiveListener.cs` | Listening: cuts the system audio stream into segments at pauses, transcribes and optionally translates them. |
 | `Pipeline/ListenNotes.cs` | Listening: the Markdown notes file of a session, written line by line. |
 | `Stt/ISpeechToText.cs` | Speech-to-text interface: warm up, transcribe, unload. |
 | `Stt/WhisperServerStt.cs` | Runs bundled `whisper-server` (Vulkan on Windows, Metal on macOS) on demand and transcribes over HTTP; language detection with an allowed list. |
-| `Stt/RecognitionRouter.cs` | Speech to text through the configured engine (`Recognition.Engine`): local Whisper or Gemini, falling back to local; builds Gemini's instruction from the language and terms. |
+| `Stt/RecognitionRouter.cs` | Speech to text through the configured engine (`Recognition.Engine`): local Whisper, Gemini or Groq, falling back to local; builds Gemini's instruction from the language and terms. |
 | `Stt/WhisperModels.cs` | Catalog of Whisper models offered in the main window (Large v3, Large v3 Turbo). |
 | `Stt/ModelDownloader.cs` | Downloads models from HuggingFace with resume and hash check. |
 | `Stt/ModelNotFoundException.cs` | "Model missing" error whose message explains how to get it. |
@@ -104,9 +105,9 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Pages/HomePage.cs` | Status and setup checklist, updates, file buttons. |
 | `Pages/HistoryPage.cs` | Statistics (today, 7 days, 30 days, all time) and all kept dictations grouped by day, with averages. |
 | `Pages/NotesPage.cs` | The notes folder as a list, newest first; New Note, Open Folder. |
-| `Pages/SpeechPage.cs` | Hotkey; engine (local or Gemini, its model, fallback), language and local speech model; post-processing: grammar check and its model, the corrections dictionary. |
+| `Pages/SpeechPage.cs` | Hotkey; engine (local, Gemini or Groq, its model, fallback), language and local speech model; post-processing: grammar check and its model, the corrections dictionary. |
 | `Pages/NotesSettingsPage.cs` | Notes folder and file type; listening (macOS: shortcut, language heard, translation language); translation (to come). |
-| `Pages/ModelsPage.cs` | Managing models (choosing happens on the feature pages): every speech and language model with its state (which feature uses it, downloaded, downloading) and Download/Cancel/Delete; memory and idle unload; the models folder; the Gemini API key (paste, Test, Remove). |
+| `Pages/ModelsPage.cs` | Managing models (choosing happens on the feature pages): every speech and language model with its state (which feature uses it, downloaded, downloading) and Download/Cancel/Delete; memory and idle unload; the models folder; the Gemini and Groq API keys (paste, Test, Remove). |
 | `TranscriptWindow.cs` | A dictation's text, editable, with Copy. |
 
 ### `WhisperLocal` — Windows app

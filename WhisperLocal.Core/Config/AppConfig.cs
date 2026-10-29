@@ -79,7 +79,10 @@ public sealed class AudioConfig
 /// <summary>Which engine turns speech into text. Whisper.Language and Whisper.InitialPrompt apply to both.</summary>
 public sealed class RecognitionConfig
 {
-    /// <summary>"Local" (Whisper on this computer) or "Gemini" (Google's cloud, needs Cloud.GeminiApiKey).</summary>
+    /// <summary>
+    /// "Local" (Whisper on this computer), "Gemini" (Google's cloud, needs Cloud.GeminiApiKey) or "Groq" (Whisper in
+    /// Groq's cloud, needs Cloud.GroqApiKey).
+    /// </summary>
     public string Engine { get; set; } = "Local";
 
     /// <summary>When the cloud fails (no internet, limit used up), transcribe the same recording locally instead.</summary>
@@ -353,6 +356,12 @@ public sealed class CloudConfig
 
     /// <summary>Gemini model for recognition; the "-latest" aliases follow Google's newest Flash models.</summary>
     public string GeminiModel { get; set; } = "gemini-flash-latest";
+
+    /// <summary>Groq API key from the Groq console ("gsk_…").</summary>
+    public string GroqApiKey { get; set; } = "";
+
+    /// <summary>Whisper model on Groq for recognition: "whisper-large-v3-turbo" or "whisper-large-v3".</summary>
+    public string GroqModel { get; set; } = "whisper-large-v3-turbo";
 
     /// <summary>A cloud request taking longer than this is given up (and falls back to local recognition).</summary>
     public int TimeoutSec { get; set; } = 30;

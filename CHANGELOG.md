@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Groq as a recognition engine: paste a Groq API key on Models → Cloud (free from the Groq console, **Get a Key**,
+  `Cloud.GroqApiKey`) and *Whisper Large v3 Turbo* and *Whisper Large v3* on Groq appear in Speech to Text →
+  Recognition → Model (`Recognition.Engine` `"Groq"`, `Cloud.GroqModel`). The same Whisper as on this computer, in
+  well under a second and without a GPU; `Whisper.Language`, `Whisper.InitialPrompt` and `Whisper.Temperature` apply,
+  and a failed request is recognised locally like with Gemini (`Recognition.FallbackToLocal`).
 - Listening panel: resizable by its edges and corners, and the lines scroll: the whole session (its last 300 lines)
   instead of the last few, following the newest line unless you scrolled up to read. The panel keeps its size and
   place for the next session.

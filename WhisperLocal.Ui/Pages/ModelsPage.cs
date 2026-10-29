@@ -33,18 +33,8 @@ internal sealed class ModelsPage : Page
     private readonly StackPanel _speechRows = new();
     private readonly StackPanel _llmRows = new();
     private readonly Note _note = new();
-    private readonly StackPanel _cloud = new() { Spacing = 6 };
-    private readonly TextBox _keyBox = new()
-    {
-        PasswordChar = '•',
-        Watermark = "Paste the API key (AIza…)",
-        FontSize = 12,
-        Width = 300,
-        VerticalContentAlignment = VerticalAlignment.Center,
-    };
-    private readonly Note _cloudNote = new();
-    private CancellationTokenSource? _check;
-    private string? _shownKey;
+    private readonly CloudCard _gemini;
+    private readonly CloudCard _groq;
     private string? _shownSpeech;
     private string? _shownLlm;
     private string? _confirmDelete; // the model path whose Delete was clicked once
@@ -73,16 +63,19 @@ internal sealed class ModelsPage : Page
             Children = { _loaded, DarkTheme.Separator(), unload, _memoryNote.Line },
         }));
         Add(DarkTheme.Section("Folder", FolderRow()));
-        Add(DarkTheme.Section("Cloud", _cloud));
+        _gemini = new CloudCard(host, "Google Gemini", "Speech · Text", "GeminiApiKey", "AIza…", "Google", "Google AI Studio",
+            "AI Studio shows it after Create API key.", GeminiClient.KeyPage,
+            "With a key, the Gemini models appear in Speech to Text → Recognition → Model.", GeminiClient.CheckKeyAsync);
+        _groq = new CloudCard(host, "Groq", "Speech", "GroqApiKey", "gsk_…", "Groq", "the Groq console",
+            "the Groq console shows it after Create API Key.", GroqClient.KeyPage,
+            "With a key, Whisper on Groq appears in Speech to Text → Recognition → Model.", GroqClient.CheckKeyAsync);
+        Add(DarkTheme.Section("Cloud", new StackPanel
+        {
+            Spacing = 6,
+            Children = { _gemini.Panel, DarkTheme.Separator(), _groq.Panel },
+        }));
 
         _idle.SelectionChanged += (_, _) => OnIdleSelected();
-        _keyBox.KeyDown += (_, e) =>
-        {
-            if (e.Key != Key.Enter)
-                return;
-            e.Handled = true;
-            SaveKey();
-        };
     }
 
     public override void OnHidden()
@@ -102,7 +95,8 @@ internal sealed class ModelsPage : Page
             RefreshLlm(cfg);
         RefreshLoaded();
         RefreshIdle(cfg.Memory.IdleUnloadMinutes);
-        RefreshCloud(cfg.Cloud.GeminiApiKey.Trim());
+        _gemini.Refresh(cfg.Cloud.GeminiApiKey.Trim());
+        _groq.Refresh(cfg.Cloud.GroqApiKey.Trim());
     }
 
     // ---- Model rows ----
@@ -118,10 +112,10 @@ internal sealed class ModelsPage : Page
     private void RefreshSpeech(AppConfig cfg)
     {
         var current = cfg.Whisper.ModelPath;
-        // With Gemini the local model is only the fallback (if that is on)
-        var gemini = RecognitionRouter.UsesGemini(cfg);
-        var inUse = gemini ? "Fallback for Gemini" : "In use";
-        var needed = !gemini || cfg.Recognition.FallbackToLocal;
+        // With a cloud engine the local model is only the fallback (if that is on)
+        var cloud = RecognitionRouter.CloudName(cfg);
+        var inUse = cloud != null ? $"Fallback for {cloud}" : "In use";
+        var needed = cloud == null || cfg.Recognition.FallbackToLocal;
         var rows = WhisperModels.Catalog
             .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, WhisperModels.Find(current) == m, inUse, needed, null, "Speech to Text"))
             .ToList();
@@ -299,107 +293,145 @@ internal sealed class ModelsPage : Page
 
     // ---- Cloud ----
 
-    /// <summary>Gemini: connected (masked key, Test, Remove) or a box to paste a key; rebuilt only when the key changes.</summary>
-    private void RefreshCloud(string key)
+    /// <summary>
+    /// One cloud provider: connected (masked key, Test, Remove) or a box to paste a key; rebuilt only when the key
+    /// changes. The key is kept in Cloud.<c>keyProperty</c>.
+    /// </summary>
+    private sealed class CloudCard
     {
-        if (key == _shownKey)
-            return;
-        _shownKey = key;
-        _cloud.Children.Clear();
+        private readonly IAppHost _host;
+        private readonly string _title, _uses, _keyProperty, _vendor, _console, _pasteHint, _keyPage, _later;
+        private readonly Func<string, CancellationToken, Task<string?>> _checkKey;
+        private readonly TextBox _keyBox;
+        private readonly Note _note = new();
+        private CancellationTokenSource? _check;
+        private string? _shownKey;
 
-        var connected = key.Length > 0;
-        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("18,*,Auto"), MinHeight = 30 };
-        row.Children.Add(DarkTheme.Dot(connected ? DarkTheme.Ok : Brushes.Transparent));
-        var texts = new StackPanel
+        public StackPanel Panel { get; } = new() { Spacing = 6 };
+
+        public CloudCard(IAppHost host, string title, string uses, string keyProperty, string keyExample, string vendor, string console,
+            string pasteHint, string keyPage, string later, Func<string, CancellationToken, Task<string?>> checkKey)
         {
-            Spacing = 1,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children =
+            _host = host;
+            (_title, _uses, _keyProperty, _vendor, _console, _pasteHint, _keyPage, _later, _checkKey) =
+                (title, uses, keyProperty, vendor, console, pasteHint, keyPage, later, checkKey);
+            _keyBox = new TextBox
             {
-                DarkTheme.Label("Google Gemini", 13),
-                DarkTheme.MutedLabel(connected
-                    ? $"Speech · Text · Connected, key {GeminiClient.Mask(key)} (kept in config.json on this computer)"
-                    : "Speech · Text · Not connected: a free key from Google AI Studio is enough", 11),
-            },
-        };
-        Grid.SetColumn(texts, 1);
-        row.Children.Add(texts);
-        var buttons = connected
-            ? new StackPanel
+                PasswordChar = '•',
+                Watermark = $"Paste the API key ({keyExample})",
+                FontSize = 12,
+                Width = 300,
+                VerticalContentAlignment = VerticalAlignment.Center,
+            };
+            _keyBox.KeyDown += (_, e) =>
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 8,
+                if (e.Key != Key.Enter)
+                    return;
+                e.Handled = true;
+                SaveKey();
+            };
+        }
+
+        public void Refresh(string key)
+        {
+            if (key == _shownKey)
+                return;
+            _shownKey = key;
+            Panel.Children.Clear();
+
+            var connected = key.Length > 0;
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("18,*,Auto"), MinHeight = 30 };
+            row.Children.Add(DarkTheme.Dot(connected ? DarkTheme.Ok : Brushes.Transparent));
+            var texts = new StackPanel
+            {
+                Spacing = 1,
+                VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
-                    DarkTheme.Button("Test", () => _ = CheckKeyAsync(key), small: true),
-                    DarkTheme.Button("Remove", RemoveKey, small: true),
+                    DarkTheme.Label(_title, 13),
+                    DarkTheme.MutedLabel(connected
+                        ? $"{_uses} · Connected, key {GeminiClient.Mask(key)} (kept in config.json on this computer)"
+                        : $"{_uses} · Not connected: a free key from {_console} is enough", 11),
                 },
-            }
-            : new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Children = { DarkTheme.Button("Get a Key", () => _host.OpenPath(GeminiClient.KeyPage), small: true) },
             };
-        buttons.Margin = new Thickness(12, 0, 0, 0);
-        Grid.SetColumn(buttons, 2);
-        row.Children.Add(buttons);
-        _cloud.Children.Add(row);
+            Grid.SetColumn(texts, 1);
+            row.Children.Add(texts);
+            var buttons = connected
+                ? new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Spacing = 8,
+                    Children =
+                    {
+                        DarkTheme.Button("Test", () => _ = CheckKeyAsync(key), small: true),
+                        DarkTheme.Button("Remove", RemoveKey, small: true),
+                    },
+                }
+                : new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Children = { DarkTheme.Button("Get a Key", () => _host.OpenPath(_keyPage), small: true) },
+                };
+            buttons.Margin = new Thickness(12, 0, 0, 0);
+            Grid.SetColumn(buttons, 2);
+            row.Children.Add(buttons);
+            Panel.Children.Add(row);
 
-        if (!connected)
-        {
-            var save = DarkTheme.Button("Save", SaveKey, accent: true, small: true);
-            var paste = Widgets.Fields(("API key", _keyBox), ("", save));
-            paste.Margin = new Thickness(18, 0, 0, 0);
-            _cloud.Children.Add(paste);
+            if (!connected)
+            {
+                var save = DarkTheme.Button("Save", SaveKey, accent: true, small: true);
+                var paste = Widgets.Fields(("API key", _keyBox), ("", save));
+                paste.Margin = new Thickness(18, 0, 0, 0);
+                Panel.Children.Add(paste);
+            }
+            _note.Line.Margin = new Thickness(18, 0, 0, 0);
+            Panel.Children.Add(_note.Line);
+            var later = DarkTheme.MutedLabel(_later, 11);
+            later.Margin = new Thickness(18, 2, 0, 0);
+            Panel.Children.Add(later);
         }
-        _cloudNote.Line.Margin = new Thickness(18, 0, 0, 0);
-        _cloud.Children.Add(_cloudNote.Line);
-        var later = DarkTheme.MutedLabel(
-            "With a key, the Gemini models appear in Speech to Text → Recognition → Model.", 11);
-        later.Margin = new Thickness(18, 2, 0, 0);
-        _cloud.Children.Add(later);
-    }
 
-    private void SaveKey()
-    {
-        var key = (_keyBox.Text ?? "").Trim();
-        if (key.Length == 0)
+        private void SaveKey()
         {
-            _cloudNote.Set("Paste the key first: AI Studio shows it after Create API key.", DarkTheme.Warning);
-            return;
+            var key = (_keyBox.Text ?? "").Trim();
+            if (key.Length == 0)
+            {
+                _note.Set($"Paste the key first: {_pasteHint}", DarkTheme.Warning);
+                return;
+            }
+            Widgets.Save(_host, "Cloud", _keyProperty, key, _note);
+            _keyBox.Text = "";
+            _ = CheckKeyAsync(key);
         }
-        Widgets.Save(_host, "Cloud", "GeminiApiKey", key, _cloudNote);
-        _keyBox.Text = "";
-        _ = CheckKeyAsync(key);
-    }
 
-    private void RemoveKey()
-    {
-        _check?.Cancel();
-        Widgets.Save(_host, "Cloud", "GeminiApiKey", "", _cloudNote);
-        _cloudNote.Set("Key removed from the config. To revoke it for good, delete it in Google AI Studio.");
-    }
+        private void RemoveKey()
+        {
+            _check?.Cancel();
+            Widgets.Save(_host, "Cloud", _keyProperty, "", _note);
+            _note.Set($"Key removed from the config. To revoke it for good, delete it in {_console}.");
+        }
 
-    private async Task CheckKeyAsync(string key)
-    {
-        _check?.Cancel();
-        var check = _check = new CancellationTokenSource();
-        _cloudNote.Set("Checking the key with Google…", DarkTheme.Accent, sticky: true);
-        string? problem;
-        try
+        private async Task CheckKeyAsync(string key)
         {
-            problem = await GeminiClient.CheckKeyAsync(key, check.Token);
+            _check?.Cancel();
+            var check = _check = new CancellationTokenSource();
+            _note.Set($"Checking the key with {_vendor}…", DarkTheme.Accent, sticky: true);
+            string? problem;
+            try
+            {
+                problem = await _checkKey(key, check.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            if (check.IsCancellationRequested)
+                return;
+            if (problem == null)
+                _note.Set("The key works.", DarkTheme.Ok);
+            else
+                _note.Set(problem, DarkTheme.Warning, sticky: true);
         }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-        if (check.IsCancellationRequested)
-            return;
-        if (problem == null)
-            _cloudNote.Set("The key works.", DarkTheme.Ok);
-        else
-            _cloudNote.Set(problem, DarkTheme.Warning, sticky: true);
     }
 
     // ---- Memory ----

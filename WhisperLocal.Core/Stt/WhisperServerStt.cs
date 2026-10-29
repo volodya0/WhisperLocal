@@ -145,7 +145,7 @@ public sealed class WhisperServerStt : ISpeechToText
         ["sv"] = "swedish", ["fi"] = "finnish", ["tr"] = "turkish", ["ja"] = "japanese", ["zh"] = "chinese",
     };
 
-    private static bool SameLanguage(string code, string reported) =>
+    internal static bool SameLanguage(string code, string reported) =>
         string.Equals(code, reported, StringComparison.OrdinalIgnoreCase)
         || (LanguageNames.TryGetValue(code, out var name) && string.Equals(name, reported, StringComparison.OrdinalIgnoreCase));
 

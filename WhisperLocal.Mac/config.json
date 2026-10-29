@@ -13,9 +13,10 @@
     "MaxDurationSec": 120
   },
   "Recognition": {
-    // "Local" (Whisper on this computer) or "Gemini" (Google's cloud, needs Cloud.GeminiApiKey)
+    // "Local" (Whisper on this computer), "Gemini" (Google's cloud, needs Cloud.GeminiApiKey) or "Groq" (Whisper in
+    // Groq's cloud, needs Cloud.GroqApiKey)
     "Engine": "Local",
-    // When Gemini fails (no internet, limit used up), transcribe the same recording locally
+    // When the cloud fails (no internet, limit used up), transcribe the same recording locally
     "FallbackToLocal": true
   },
   "Whisper": {
@@ -189,6 +190,10 @@
     "GeminiApiKey": "",
     // Gemini model for recognition; "gemini-flash-latest" follows Google's newest Flash model
     "GeminiModel": "gemini-flash-latest",
+    // Groq API key from https://console.groq.com/keys; set it on the Models page
+    "GroqApiKey": "",
+    // Whisper model on Groq: "whisper-large-v3-turbo" (faster) or "whisper-large-v3" (most accurate)
+    "GroqModel": "whisper-large-v3-turbo",
     "TimeoutSec": 30
   },
   "Ui": {

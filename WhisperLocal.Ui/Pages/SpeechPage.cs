@@ -23,11 +23,11 @@ internal sealed class SpeechPage : Page
     private readonly ComboBox _models = DarkTheme.Dropdown(300);
     private readonly CheckBox _fallback = new()
     {
-        Content = "If Gemini fails (no internet, limit used up), recognise on this computer",
+        Content = "If the cloud fails (no internet, limit used up), recognise on this computer",
         FontSize = 13,
         Foreground = DarkTheme.Text,
     };
-    private readonly TextBlock _cloudNote = DarkTheme.MutedLabel("Recordings are sent to Google for recognition.", 11);
+    private readonly TextBlock _cloudNote = DarkTheme.MutedLabel("", 11);
     private readonly TextBlock _modelProblem = DarkTheme.Label("", 12, brush: DarkTheme.Warning);
     private readonly Grid _modelProblemRow = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
     private readonly Note _recognitionNote = new();
@@ -259,20 +259,41 @@ internal sealed class SpeechPage : Page
 
     // ---- Model: one list of what is ready to use, local and cloud ----
 
-    /// <summary>A recognition model: on this computer (<paramref name="Value"/> is Whisper.ModelPath) or Gemini (Cloud.GeminiModel).</summary>
-    private sealed record ModelChoice(string Title, bool Cloud, string Value, string Hint);
+    /// <summary>
+    /// A recognition model: on this computer (<paramref name="Engine"/> "Local", <paramref name="Value"/> is
+    /// Whisper.ModelPath) or in the cloud ("Gemini" or "Groq", <paramref name="Value"/> is Cloud.GeminiModel or Cloud.GroqModel).
+    /// </summary>
+    private sealed record ModelChoice(string Title, string Engine, string Value, string Hint)
+    {
+        public bool Cloud => Engine != "Local";
+    }
 
-    private static readonly (string Title, string Id, string Hint)[] GeminiModels =
+    /// <summary>A cloud provider's recognition models, and where its key and model are kept.</summary>
+    private sealed record CloudModels(string Engine, string Vendor, string ModelProperty, (string Title, string Id, string Hint)[] Models)
+    {
+        public string Key(AppConfig c) => (Engine == "Groq" ? c.Cloud.GroqApiKey : c.Cloud.GeminiApiKey).Trim();
+        public string Model(AppConfig c) => Engine == "Groq" ? c.Cloud.GroqModel : c.Cloud.GeminiModel;
+    }
+
+    private static readonly CloudModels[] CloudProviders =
     [
-        ("Gemini Flash", "gemini-flash-latest", "Google's newest Flash model: accurate, a second or two per dictation."),
-        ("Gemini Flash-Lite", "gemini-flash-lite-latest", "Smaller and faster, a bit less accurate; higher free limits."),
+        new("Gemini", "Google", "GeminiModel",
+        [
+            ("Gemini Flash", "gemini-flash-latest", "Google's newest Flash model: accurate, a second or two per dictation."),
+            ("Gemini Flash-Lite", "gemini-flash-lite-latest", "Smaller and faster, a bit less accurate; higher free limits."),
+        ]),
+        new("Groq", "Groq", "GroqModel",
+        [
+            ("Whisper Large v3 Turbo", "whisper-large-v3-turbo", "Whisper on Groq: well under a second per dictation, almost as accurate as Large v3."),
+            ("Whisper Large v3", "whisper-large-v3", "The most accurate Whisper on Groq, still fast."),
+        ]),
     ];
 
     private void RefreshModels(AppConfig cfg)
     {
-        var gemini = RecognitionRouter.UsesGemini(cfg);
-        var wantsGemini = string.Equals(cfg.Recognition.Engine, "Gemini", StringComparison.OrdinalIgnoreCase);
-        var hasKey = cfg.Cloud.GeminiApiKey.Trim().Length > 0;
+        var cloud = RecognitionRouter.CloudName(cfg);
+        var wanted = CloudProviders.FirstOrDefault(p => RecognitionRouter.IsEngine(cfg, p.Engine));
+        var hasWantedKey = wanted != null && wanted.Key(cfg).Length > 0;
         var localPath = cfg.Whisper.ModelPath;
         var localReady = File.Exists(AppPaths.Resolve(localPath));
         var local = WhisperModels.Find(localPath);
@@ -280,29 +301,31 @@ internal sealed class SpeechPage : Page
 
         // Rebuilt when the choice or what is available changes (a download finishing, a key added)
         var downloaded = WhisperModels.Catalog.Where(m => File.Exists(AppPaths.Resolve("models/" + m.File))).ToList();
-        var signature = $"{cfg.Recognition.Engine}|{localPath}|{cfg.Cloud.GeminiModel}|{hasKey}|{localReady}|{string.Join(",", downloaded.Select(m => m.File))}";
+        var signature = $"{cfg.Recognition.Engine}|{localPath}|{localReady}|{string.Join(",", downloaded.Select(m => m.File))}|" +
+                        string.Join("|", CloudProviders.Select(p => $"{p.Model(cfg)}|{p.Key(cfg).Length > 0}"));
         if (signature != _shownModels)
         {
             _shownModels = signature;
             _modelChoices = downloaded
-                .Select(m => new ModelChoice($"{m.Title} · on this computer", false, "models/" + m.File, m.Hint))
+                .Select(m => new ModelChoice($"{m.Title} · on this computer", "Local", "models/" + m.File, m.Hint))
                 .ToList();
             if (local == null && localReady)
-                _modelChoices.Add(new ModelChoice($"{localName} · on this computer", false, localPath, "Set in the config (Whisper.ModelPath)."));
-            if (hasKey)
-                _modelChoices.AddRange(GeminiModels.Select(m => new ModelChoice($"{m.Title} · Google cloud", true, m.Id, m.Hint)));
+                _modelChoices.Add(new ModelChoice($"{localName} · on this computer", "Local", localPath, "Set in the config (Whisper.ModelPath)."));
+            foreach (var p in CloudProviders.Where(p => p.Key(cfg).Length > 0))
+                _modelChoices.AddRange(p.Models.Select(m => new ModelChoice($"{m.Title} · {p.Vendor} cloud", p.Engine, m.Id, m.Hint)));
 
             // The current choice is always listed, even when it is not ready, so the setting stays visible
             int index;
-            if (wantsGemini)
+            if (wanted != null)
             {
-                index = _modelChoices.FindIndex(c => c.Cloud && c.Value == cfg.Cloud.GeminiModel);
+                var model = wanted.Model(cfg);
+                index = _modelChoices.FindIndex(c => c.Engine == wanted.Engine && c.Value == model);
                 if (index < 0)
                 {
-                    var known = GeminiModels.FirstOrDefault(m => m.Id == cfg.Cloud.GeminiModel);
-                    var title = known.Title ?? cfg.Cloud.GeminiModel;
-                    _modelChoices.Add(new ModelChoice(hasKey ? $"{title} · Google cloud" : $"{title} · needs an API key", true,
-                        cfg.Cloud.GeminiModel, known.Hint ?? "Set in the config (Cloud.GeminiModel): any Gemini model that accepts audio."));
+                    var known = wanted.Models.FirstOrDefault(m => m.Id == model);
+                    var title = known.Title ?? model;
+                    _modelChoices.Add(new ModelChoice(hasWantedKey ? $"{title} · {wanted.Vendor} cloud" : $"{title} · needs an API key", wanted.Engine,
+                        model, known.Hint ?? $"Set in the config (Cloud.{wanted.ModelProperty})."));
                     index = _modelChoices.Count - 1;
                 }
             }
@@ -311,7 +334,7 @@ internal sealed class SpeechPage : Page
                 index = _modelChoices.FindIndex(c => !c.Cloud && WhisperModels.Find(c.Value) == local && (local != null || c.Value == localPath));
                 if (index < 0)
                 {
-                    _modelChoices.Add(new ModelChoice($"{localName} · not downloaded", false, localPath, local?.Hint ?? "Set in the config (Whisper.ModelPath)."));
+                    _modelChoices.Add(new ModelChoice($"{localName} · not downloaded", "Local", localPath, local?.Hint ?? "Set in the config (Whisper.ModelPath)."));
                     index = _modelChoices.Count - 1;
                 }
             }
@@ -327,15 +350,16 @@ internal sealed class SpeechPage : Page
         }
         // The fallback uses the last local model chosen
         _fallback.Content = localReady
-            ? $"If Gemini fails (no internet, limit used up), recognise on this computer with {localName}"
-            : "If Gemini fails (no internet, limit used up), recognise on this computer (no local model downloaded)";
-        _fallback.IsVisible = _cloudNote.IsVisible = gemini;
+            ? $"If {cloud ?? "the cloud"} fails (no internet, limit used up), recognise on this computer with {localName}"
+            : $"If {cloud ?? "the cloud"} fails (no internet, limit used up), recognise on this computer (no local model downloaded)";
+        _fallback.IsVisible = _cloudNote.IsVisible = cloud != null;
+        _cloudNote.Text = $"Recordings are sent to {(cloud == "Groq" ? "Groq" : "Google")} for recognition.";
 
         // Checked every time: the line goes away when the download finishes or the key is added
         string? problem = null;
-        if (wantsGemini && !hasKey)
-            problem = "Gemini needs an API key: add it on the Models page. Until then recognition runs on this computer.";
-        else if ((!gemini || cfg.Recognition.FallbackToLocal) && !localReady && _host.DownloadProgress(localPath) == null)
+        if (wanted != null && !hasWantedKey)
+            problem = $"{wanted.Engine} needs an API key: add it on the Models page. Until then recognition runs on this computer.";
+        else if ((cloud == null || cfg.Recognition.FallbackToLocal) && !localReady && _host.DownloadProgress(localPath) == null)
             problem = _modelChoices.Count == 0 || (_modelChoices.Count == 1 && !File.Exists(AppPaths.Resolve(_modelChoices[0].Value)))
                 ? "No model is ready yet: download one, or add a cloud key, on the Models page."
                 : $"{localName} is not downloaded yet: download it on the Models page, or choose another model.";
@@ -349,11 +373,11 @@ internal sealed class SpeechPage : Page
         if (_updating || i < 0 || i >= _modelChoices.Count)
             return;
         var choice = _modelChoices[i];
-        // The engine follows the model; the local model is kept as Gemini's fallback when a cloud model is chosen
-        if (choice.Cloud)
+        // The engine follows the model; the local model is kept as the cloud's fallback when a cloud model is chosen
+        if (CloudProviders.FirstOrDefault(p => p.Engine == choice.Engine) is { } provider)
         {
-            Widgets.Save(_host, "Cloud", "GeminiModel", choice.Value, _recognitionNote);
-            Widgets.Save(_host, "Recognition", "Engine", "Gemini", _recognitionNote);
+            Widgets.Save(_host, "Cloud", provider.ModelProperty, choice.Value, _recognitionNote);
+            Widgets.Save(_host, "Recognition", "Engine", provider.Engine, _recognitionNote);
         }
         else
         {
