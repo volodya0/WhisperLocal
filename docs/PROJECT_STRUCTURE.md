@@ -18,7 +18,7 @@ graph TD
 | Project | Role |
 |---|---|
 | `WhisperLocal.Core` | Everything that does not touch the OS UI: config, the dictation pipeline, the whisper/llama server processes, text filters, history and statistics, model downloads. |
-| `WhisperLocal.Ui` | Cross-platform Avalonia windows (main window, history, statistics, transcript). The platform app plugs in through `IAppHost`. Used by both apps. |
+| `WhisperLocal.Ui` | Cross-platform Avalonia windows (the main window with its pages, the transcript). The platform app plugs in through `IAppHost`. Used by both apps. |
 | `WhisperLocal` | Windows app: tray icon, low-level keyboard hook, WASAPI recording, clipboard + Ctrl+V, WinForms indicator; hosts the shared windows on its WinForms message loop. |
 | `WhisperLocal.Mac` | macOS app: menu bar item, CGEventTap hotkey, AudioQueue recording, pasteboard + Cmd+V, native floating panels, updater. |
 
@@ -29,7 +29,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 1. **Hotkey down**: `KeyboardHook` (Windows) / `HotkeyTap` (macOS) fires; the tray app remembers the foreground
    app and starts recording (`AudioRecorder` / `MacAudioRecorder`). The indicator shows "Recording".
 2. **Hotkey up**: recording stops and yields 16 kHz mono 16-bit PCM.
-3. **Pipeline** (`DictationPipeline`): WAV → `WhisperServerStt` (starts `whisper-server` on demand) →
+3. **Pipeline** (`DictationPipeline`): WAV → `RecognitionRouter` → `WhisperServerStt` (starts `whisper-server` on demand) or Gemini →
    `TextFilters` (hallucination removal, dictionary replacements) → optional `OllamaCleaner`.
 4. **Insert**: `TextInserter` / `MacTextInserter` puts the text on the clipboard and sends Ctrl+V / Cmd+V to
    the remembered app. On macOS, if no text field is focused, the transcript window opens instead.
@@ -73,10 +73,13 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Native/JobObjectMethods.cs` | P/Invoke declarations for the Windows job object API. |
 | `Pipeline/DictationPipeline.cs` | Audio → speech-to-text → filters → optional LLM cleanup; returns the text and timings. |
 | `Pipeline/DictationHistory.cs` | Last 1000 dictations with timings, in `history.jsonl`. |
-| `Pipeline/DictationStats.cs` | Lifetime statistics (today / 7 days / all time) in `stats.json`. |
+| `Pipeline/DictationStats.cs` | Lifetime statistics (today / 7 / 30 days / all time) in `stats.json`. |
+| `Cloud/GeminiClient.cs` | Google Gemini API with the user's key: checks that a key works; transcribes a recording (generateContent with the audio inline). |
+| `Notes/NoteFiles.cs` | The notes folder: lists `.md`/`.txt` files newest first with their first line, creates new notes. |
 | `Pipeline/LiveAutocomplete.cs` | Autocomplete loop while the hotkey is held (shelved). |
 | `Stt/ISpeechToText.cs` | Speech-to-text interface: warm up, transcribe, unload. |
 | `Stt/WhisperServerStt.cs` | Runs bundled `whisper-server` (Vulkan on Windows, Metal on macOS) on demand and transcribes over HTTP; language detection with an allowed list. |
+| `Stt/RecognitionRouter.cs` | Speech to text through the configured engine (`Recognition.Engine`): local Whisper or Gemini, falling back to local; builds Gemini's instruction from the language and terms. |
 | `Stt/WhisperModels.cs` | Catalog of Whisper models offered in the main window (Large v3, Large v3 Turbo). |
 | `Stt/ModelDownloader.cs` | Downloads models from HuggingFace with resume and hash check. |
 | `Stt/ModelNotFoundException.cs` | "Model missing" error whose message explains how to get it. |
@@ -90,11 +93,17 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 |---|---|
 | `WhisperLocal.Ui.csproj` | net8.0 library; Avalonia 11. |
 | `App.cs` | The Avalonia application; the platform app hooks in through `App.Started`. |
-| `IAppHost.cs` | What the windows need from the platform app: config, history, setup checklist items, hotkey recording, load/unload, opening files. |
+| `IAppHost.cs` | What the windows need from the platform app: config, history, setup checklist items, hotkey recording, load/unload, model downloads, opening files. |
 | `DarkTheme.cs` | Palette and building blocks (cards, labels, buttons, dropdowns, status dots). |
-| `MainWindow.cs` | Main window: status header, setup checklist, hotkey and language, speech model and memory, grammar check and its model, last 3 dictations, file buttons. |
-| `HistoryWindow.cs` | All kept dictations grouped by day, with averages. |
-| `StatsWindow.cs` | Statistics tiles for today, 7 days, all time. |
+| `Widgets.cs` | Shared page pieces: labelled field rows, status rows with fix-it buttons, the overall status, saving a config value, the self-hiding note line. |
+| `MainWindow.cs` | Main window: sidebar (Home, History, Notes; settings: Speech to Text, Notes & Translate, Models; the status at the bottom) and the selected page. |
+| `Pages/Page.cs` | Base of a page: title and a scrolling column of cards, refreshed while on screen. |
+| `Pages/HomePage.cs` | Status and setup checklist, updates, file buttons. |
+| `Pages/HistoryPage.cs` | Statistics (today, 7 days, 30 days, all time) and all kept dictations grouped by day, with averages. |
+| `Pages/NotesPage.cs` | The notes folder as a list, newest first; New Note, Open Folder. |
+| `Pages/SpeechPage.cs` | Hotkey; engine (local or Gemini, its model, fallback), language and local speech model; post-processing: grammar check and its model, the corrections dictionary. |
+| `Pages/NotesSettingsPage.cs` | Notes folder and file type; translation (to come). |
+| `Pages/ModelsPage.cs` | Every speech and language model with its state (in use, downloaded, downloading) and Download/Cancel/Use; memory and idle unload; the models folder; the Gemini API key (paste, Test, Remove). |
 | `TranscriptWindow.cs` | A dictation's text, editable, with Copy. |
 
 ### `WhisperLocal` — Windows app

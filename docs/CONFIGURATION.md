@@ -31,6 +31,8 @@ relative to the data folder.
 | `Hotkey.SuppressKey` | Swallow the hotkey so the app you type in does not see it. |
 | `Audio.DeviceName` | Part of the microphone name; empty = the system default. |
 | `Audio.MaxDurationSec` | A recording stops by itself after this long. |
+| `Recognition.Engine` | `"Local"` (Whisper on this computer, the default) or `"Gemini"`: recordings are sent to Google's Gemini API with `Cloud.GeminiApiKey`. `Whisper.Language` and `Whisper.InitialPrompt` (the terms) apply to Gemini too. |
+| `Recognition.FallbackToLocal` | When Gemini fails (no internet, limit used up, timeout), transcribe the recording locally instead (default `true`). |
 | `Whisper.ModelPath` | The speech model file: `models/ggml-large-v3-turbo.bin` (Windows default) or `models/ggml-large-v3.bin` (macOS default, the most accurate). |
 | `Whisper.Language` | `"uk,en"` (detected per dictation, the default), `"uk,en,ru"`, `"uk"`, `"en"`, `"auto"`, or any list of language codes; the first one is the fallback. A single language makes speech in another language come out translated into it. |
 | `Whisper.ExtraArgs` | Extra `whisper-server` arguments. Windows default `-dev 0 -sns -t 8` (GPU index, suppress non-speech tokens, threads); add `-bs 5` for beam search (a bit more accurate, a bit slower). |
@@ -39,6 +41,11 @@ relative to the data folder.
 | `Insert.AppendTrailingSpace` | Add a space after the pasted text. |
 | `Insert.RestoreClipboard` | Put the previous clipboard content back after pasting. |
 | `Insert.ShowWhenNoTextField` | When nothing can take text (macOS: no text field focused; Windows: the desktop or the taskbar), open the transcript instead of pasting. |
+| `Notes.Folder` | The folder the Notes page lists (`.md` and `.txt` files); empty = `WhisperLocal Notes` in Documents. `~/` is the home folder. |
+| `Notes.Extension` | File type of notes made with New Note: `".md"` (default) or `".txt"`. |
+| `Cloud.GeminiApiKey` | Your Google Gemini API key (from [Google AI Studio](https://aistudio.google.com/apikey)); set on the Models page, kept here as plain text. |
+| `Cloud.GeminiModel` | Gemini model for recognition: `gemini-flash-latest` (default) or `gemini-flash-lite-latest` (faster), or any Gemini model id that accepts audio. |
+| `Cloud.TimeoutSec` | A Gemini request taking longer is given up (default 30). |
 | `Ui.ShowOverlay` | Show the indicator at the bottom of the screen. |
 | `Ui.ResultSeconds` | How long the indicator shows a dictation's summary. |
 | `Logging.LogText` | Keep the text of each dictation in the log and the history (on by default). |
@@ -77,10 +84,10 @@ CPU; `-ng` runs on the CPU only.
 
 | Setting | Meaning |
 |---|---|
-| `Polish.Enabled` | Propose a corrected version after each dictation (the checkbox in the main window). |
+| `Polish.Enabled` | Propose a corrected version after each dictation (the checkbox in Speech to Text → Post-processing). |
 | `Polish.MinWords` | Shorter dictations are not checked. |
 | `Polish.DisplaySeconds` | How long the proposal stays (longer while the mouse is over it). |
-| `LocalLlm.ModelPath` | The GGUF model (chosen and downloaded in the main window; any instruction-tuned GGUF works). |
+| `LocalLlm.ModelPath` | The GGUF model (chosen in Speech to Text, downloaded on the Models page; any instruction-tuned GGUF works). |
 | `LocalLlm.ServerExe`, `Port`, `ExtraArgs` | The bundled `llama-server` and how it runs. |
 
 ## LLM cleanup through Ollama (optional)

@@ -59,24 +59,40 @@ file list), nothing is pasted — the text opens in that window instead.
 Open the main window from the menu bar icon → **Open WhisperLocal…** (or open WhisperLocal from Applications again).
 On Windows, double-click the tray icon.
 
-- **Hotkey** — pick a preset, or press **Record…** and hold any combination you like.
-- **Language** — Ukrainian + English (detected for each dictation) is the default. Other choices: add Russian,
-  Ukrainian only, English only, or any language. With a single language, speech in another language comes out
-  translated into it.
-- **Speech model** — *Large v3* is the most accurate; *Large v3 Turbo* is several times faster and almost as
-  accurate, the better choice for computers with 8–16 GB of memory (the default on Windows). **Unload** frees the memory right away; this also
-  happens by itself after 5 minutes without dictation.
-- **Grammar check** — see below.
-- **Recent dictations** — the last three, with timings. **All history** and **Statistics** (words, speaking time,
-  words per minute) open their own windows.
-- **Files** — open the config file, the log, or the data folder.
+The sidebar on the left has the pages, with the settings below them and the status (Ready, or what needs
+attention) at the bottom.
+
+- **Home** — the status with the setup checklist, **Check for Updates**, and buttons that open the config file, the
+  log or the data folder.
+- **History** — statistics (dictations, words, speaking time, words per minute) for today, 7 days, 30 days or all
+  time, and every kept dictation grouped by day.
+- **Notes** — the text files in your notes folder, newest first. **New Note** creates one and opens it in your text
+  editor; any `.md` or `.txt` file you put in the folder shows up too.
+- **Speech to Text**
+  - **Hotkey** — pick a preset, or press **Record…** and hold any combination you like.
+  - **Language** — Ukrainian + English (detected for each dictation) is the default. Other choices: add Russian,
+    Ukrainian only, English only, or any language. With a single language, speech in another language comes out
+    translated into it.
+  - **Engine** — *On this computer (Whisper)*, the default, or *Google Gemini (cloud)* with your API key from the
+    Models page: often more accurate with mixed Ukrainian and English, but the recording is sent to Google. Choose the
+    Gemini model (Flash, or the faster Flash-Lite), and whether a failed request (no internet, limit used up) is
+    recognised on this computer instead.
+  - **Local model** — *Large v3* is the most accurate; *Large v3 Turbo* is several times faster and almost as accurate, the
+    better choice for computers with 8–16 GB of memory (the default on Windows).
+  - **Post-processing** — the grammar check (see below) and the correction rules for words Whisper mishears.
+- **Notes & Translate** — which folder holds the notes, and whether new ones are Markdown or plain text.
+- **Models** — every speech and language model: downloaded or not, which one is in use, **Download** and **Use**;
+  whether the speech model is loaded (**Unload** frees the memory right away) and after how long without dictation
+  models unload by themselves (5 minutes by default); the folder the models are downloaded to; and **Cloud**, where
+  you can paste a Google Gemini API key (free from Google AI Studio, **Get a Key**) and **Test** it; then choose Gemini as
+  the engine in Speech to Text.
 
 Everything else (start at login, which microphone, English terms that get misheard…) is in the config file: see
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Changes apply as soon as you save it.
 
 ## Grammar check (macOS, optional)
 
-Turn it on in the main window and download its model (Gemma 3 4B, 2.5 GB, is the default). After each dictation, a
+Turn it on in Speech to Text → Post-processing and download its model on the Models page (Gemma 3 4B, 2.5 GB, is the default). After each dictation, a
 small panel proposes a corrected version with the changed words in green. Its buttons replace what was pasted with
 the corrected text or copy it; or just ignore it — it goes away by itself. It runs locally too.
 
@@ -104,12 +120,14 @@ The menu bar icon on macOS, the tray icon on Windows:
   app; run WhisperLocal as administrator too.
 - **Slow on a Windows PC with two GPUs.** It may be using the integrated one: see
   [choosing the GPU](docs/CONFIGURATION.md#choosing-the-gpu-windows).
-- Anything else: the log (main window → **Log**) usually says what went wrong.
+- Anything else: the log (Home → **Log**) usually says what went wrong.
 
 ## Privacy
 
-Audio and text never leave your computer. The only network access is downloading models from HuggingFace and,
-when you ask for it, checking GitHub for updates. Recordings are not saved. The log and the dictation history keep
+Unless you choose Gemini, audio and text never leave your computer. The only network access is downloading models
+from HuggingFace and, when you ask for it, checking GitHub for updates and checking a Gemini API key with Google.
+With Gemini as the recognition engine, each recording is sent to Google's Gemini API; on the free tier Google may use
+it to improve its products (see Google's terms). Recordings are not saved. The log and the dictation history keep
 the text of your dictations to help with troubleshooting; set `Logging.LogText` to `false` in the config to stop
 that.
 

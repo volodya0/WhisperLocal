@@ -9,6 +9,7 @@ public sealed class AppConfig
 
     public HotkeyConfig Hotkey { get; set; } = new();
     public AudioConfig Audio { get; set; } = new();
+    public RecognitionConfig Recognition { get; set; } = new();
     public WhisperConfig Whisper { get; set; } = new();
     public MemoryConfig Memory { get; set; } = new();
     public FilterConfig Filter { get; set; } = new();
@@ -38,6 +39,8 @@ public sealed class AppConfig
     public AutocompleteConfig Autocomplete { get; set; } = new();
     public PolishConfig Polish { get; set; } = new();
     public InsertConfig Insert { get; set; } = new();
+    public NotesConfig Notes { get; set; } = new();
+    public CloudConfig Cloud { get; set; } = new();
     public UiConfig Ui { get; set; } = new();
     public LoggingConfig Logging { get; set; } = new();
 }
@@ -70,6 +73,16 @@ public sealed class AudioConfig
 
     /// <summary>Recording stops automatically after this many seconds (0 = unlimited).</summary>
     public int MaxDurationSec { get; set; } = 120;
+}
+
+/// <summary>Which engine turns speech into text. Whisper.Language and Whisper.InitialPrompt apply to both.</summary>
+public sealed class RecognitionConfig
+{
+    /// <summary>"Local" (Whisper on this computer) or "Gemini" (Google's cloud, needs Cloud.GeminiApiKey).</summary>
+    public string Engine { get; set; } = "Local";
+
+    /// <summary>When the cloud fails (no internet, limit used up), transcribe the same recording locally instead.</summary>
+    public bool FallbackToLocal { get; set; } = true;
 }
 
 public sealed class WhisperConfig
@@ -283,6 +296,29 @@ public sealed class InsertConfig
 
     /// <summary>macOS: when no text input is focused, open the transcript (editable, to copy) instead of pasting into nothing.</summary>
     public bool ShowWhenNoTextField { get; set; } = true;
+}
+
+/// <summary>The Notes page: text files in one folder, newest first.</summary>
+public sealed class NotesConfig
+{
+    /// <summary>Folder with the notes; empty = "WhisperLocal Notes" in Documents. "~/" is the home folder.</summary>
+    public string Folder { get; set; } = "";
+
+    /// <summary>File type of new notes: ".md" or ".txt". The Notes page lists both.</summary>
+    public string Extension { get; set; } = ".md";
+}
+
+/// <summary>Cloud models with the user's own API keys; empty = not connected. Stored in this file as plain text.</summary>
+public sealed class CloudConfig
+{
+    /// <summary>Google Gemini API key from Google AI Studio ("AIza…").</summary>
+    public string GeminiApiKey { get; set; } = "";
+
+    /// <summary>Gemini model for recognition; the "-latest" aliases follow Google's newest Flash models.</summary>
+    public string GeminiModel { get; set; } = "gemini-flash-latest";
+
+    /// <summary>A cloud request taking longer than this is given up (and falls back to local recognition).</summary>
+    public int TimeoutSec { get; set; } = 30;
 }
 
 public sealed class UiConfig

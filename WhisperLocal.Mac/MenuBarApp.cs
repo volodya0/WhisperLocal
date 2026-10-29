@@ -75,6 +75,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     {
         public CancellationTokenSource Cancel { get; } = new();
         public string Text { get; set; } = "";
+
+        /// <summary>Full path of the model file.</summary>
+        public string Model { get; init; } = "";
     }
 
     public MenuBarApp(ConfigManager config, IClassicDesktopStyleApplicationLifetime desktop)
@@ -87,7 +90,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _stats = new DictationStats(Path.Combine(AppPaths.DataDir, "stats.json"), _history.Recent(int.MaxValue));
         _stt = new WhisperServerStt(config);
         _llm = new OllamaCleaner(config);
-        _pipeline = new DictationPipeline(config, _stt, _llm);
+        _pipeline = new DictationPipeline(config, new RecognitionRouter(config, _stt), _llm);
         _llama = new LlamaServer(config);
         _autocompleter = new Autocompleter(config, _llama);
         _liveAutocomplete = new LiveAutocomplete(config, _stt, _autocompleter);
@@ -145,7 +148,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
         if (_mainWindow.HasProblems)
             ShowMainWindow();
-        else if (config.Current.Whisper.StartOnLaunch)
+        else if (config.Current.Whisper.StartOnLaunch && !RecognitionRouter.UsesGemini(config.Current))
             _ = WarmUpWhisperAsync();
     }
 
@@ -200,7 +203,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             items.Add(new SetupItem(SetupState.Ok, $"Model: {name} ({FormatSize(new FileInfo(model).Length)})",
                 "Show Folder", () => Dialogs.Open(Path.GetDirectoryName(model)!)));
         else
-            items.Add(new SetupItem(SetupState.Error, $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
+            // With Gemini the local model is only the fallback
+            items.Add(new SetupItem(RecognitionRouter.UsesGemini(_config.Current) ? SetupState.Warning : SetupState.Error,
+                $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
 
         var hotkey = HotkeyTap.Describe(_config.Current.Hotkey.Key);
         items.Add(_hotkey.IsInstalled
@@ -283,6 +288,22 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     {
         _lastActivityUtc = DateTime.UtcNow;
         await WarmUpWhisperAsync();
+    }
+
+    public void DownloadModel(string modelPath, string? url = null)
+    {
+        var model = AppPaths.Resolve(modelPath);
+        _ = url == null ? DownloadModelAsync(model) : DownloadLlmAsync(model, url);
+    }
+
+    public string? DownloadProgress(string modelPath) => FindDownload(modelPath)?.Text;
+
+    public void CancelDownload(string modelPath) => FindDownload(modelPath)?.Cancel.Cancel();
+
+    private Download? FindDownload(string modelPath)
+    {
+        var model = AppPaths.Resolve(modelPath);
+        return new[] { _download, _llmDownload }.FirstOrDefault(d => d != null && d.Model == model);
     }
 
     public void CheckForUpdates() => _ = CheckForUpdatesAsync();
@@ -380,7 +401,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
         // Do not let the user dictate for nothing
         var modelPath = AppPaths.Resolve(cfg.Whisper.ModelPath);
-        if (!File.Exists(modelPath))
+        if (!File.Exists(modelPath) && !RecognitionRouter.UsesGemini(cfg))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
             ShowModelMissing(new ModelNotFoundException(modelPath));
@@ -738,7 +759,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     {
         if (_download != null)
             return;
-        var download = _download = new Download();
+        var download = _download = new Download { Model = model };
         try
         {
             if (await DownloadAsync(model, ModelDownloader.UrlFor(model), download))
@@ -755,7 +776,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     {
         if (_llmDownload != null)
             return;
-        var download = _llmDownload = new Download();
+        var download = _llmDownload = new Download { Model = model };
         try
         {
             if (await DownloadAsync(model, url, download))

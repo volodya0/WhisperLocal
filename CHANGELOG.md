@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Main window redesign: a sidebar with the pages (Home, History, Notes) and the settings (Speech to Text, Notes &
+  Translate, Models), with the status always at the bottom. Home has the status and setup checklist, updates and
+  files. History and statistics are one page instead of two windows, and
+  statistics have a 30-day period. Speech to Text has the hotkey, language, speech model and post-processing (grammar
+  check, correction rules). Models lists every speech and language model with its state and Download, Cancel and
+  Use, the speech model's memory, the idle unload time (`Memory.IdleUnloadMinutes`) as a dropdown, and the models folder.
+- Notes: a page listing the `.md` and `.txt` files of a notes folder (`Notes.Folder`, by default
+  `WhisperLocal Notes` in Documents), newest first with their first line; New Note creates one (`Notes.Extension`)
+  and opens it in the text editor. The folder and file type are set on the Notes & Translate page.
+- Models → Cloud: paste a Google Gemini API key (Get a Key opens Google AI Studio), Test it, Remove it. The key is
+  kept in `config.json` (`Cloud.GeminiApiKey`).
+- Gemini as a recognition engine (Speech to Text → Recognition → Engine, `Recognition.Engine`): the recording goes
+  to Google's Gemini API (`Cloud.GeminiModel`, `gemini-flash-latest` by default, or Flash-Lite) with an instruction
+  built from the language setting and the terms of `Whisper.InitialPrompt`; the correction rules and filters still
+  apply. When Gemini fails (no internet, limit used up, `Cloud.TimeoutSec`), the recording is recognised locally
+  (`Recognition.FallbackToLocal`). With Gemini the local model is not loaded in advance, and a missing local model
+  is only a warning.
 - Windows: WhisperLocal.exe has the waveform app icon (Explorer, taskbar, Alt+Tab, Start) instead of the default one.
 - Main window: a GitHub button next to Check for Updates opens the project's page.
 - Windows: the shared main window (setup checklist with model download, hotkey selector with Record…, language,

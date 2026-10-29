@@ -46,6 +46,17 @@ public interface IAppHost
     Task UnloadAsync();
     Task LoadAsync();
 
+    /// <summary>
+    /// Downloads a model into the models folder: a speech model (a Whisper.ModelPath value), or with
+    /// <paramref name="url"/> a language model. One download of each kind at a time; others are ignored.
+    /// </summary>
+    void DownloadModel(string modelPath, string? url = null);
+
+    /// <summary>"Downloading …: 40%" while <paramref name="modelPath"/> is being downloaded, otherwise null.</summary>
+    string? DownloadProgress(string modelPath);
+
+    void CancelDownload(string modelPath);
+
     void CheckForUpdates();
 
     /// <summary>Opens a file, folder or web address; <paramref name="textEditor"/> forces a text editor.</summary>

@@ -5,80 +5,120 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using WhisperLocal.Pipeline;
 
-namespace WhisperLocal.Ui;
+namespace WhisperLocal.Ui.Pages;
 
 /// <summary>
-/// All kept dictations, grouped by day, with average timings; the newest page first, "Show more" adds the next.
-/// Closing only hides it.
+/// Statistics for a period on top, then all kept dictations grouped by day with average timings; the newest page
+/// first, "Show more" adds the next.
 /// </summary>
-public sealed class HistoryWindow : Window
+internal sealed class HistoryPage : Page
 {
     private const int PageSize = 100;
 
     private readonly IAppHost _host;
     private readonly TranscriptWindow _transcript;
+    private readonly Grid _tiles = new();
+    private readonly TextBlock _statsNote = DarkTheme.MutedLabel("");
     private readonly StackPanel _list = new();
     private readonly TextBlock _note = DarkTheme.MutedLabel("");
     private readonly Button _more;
+    private int _period; // 0 today, 1 last 7 days, 2 last 30 days, 3 all time
     private int _shown = PageSize;
-    private bool _allowClose;
+    private bool _dirty = true;
+    private DateTime _shownDay;
 
-    public HistoryWindow(IAppHost host, TranscriptWindow transcript)
+    public HistoryPage(IAppHost host, TranscriptWindow transcript) : base("History")
     {
         _host = host;
         _transcript = transcript;
-        Title = "Dictation History";
-        Icon = App.WindowIcon;
-        Width = 680;
-        Height = 620;
-        MinWidth = 480;
-        MinHeight = 320;
-        Background = DarkTheme.Background;
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         _note.Margin = new Thickness(0, 6, 0, 0);
         _more = DarkTheme.Button("Show more", () =>
         {
             _shown += PageSize;
+            _dirty = true;
             Refresh();
         }, small: true);
         _more.HorizontalAlignment = HorizontalAlignment.Left;
         _more.Margin = new Thickness(0, 6, 0, 0);
-        Content = new ScrollViewer
-        {
-            Content = new StackPanel
+
+        Add(DarkTheme.Section("Statistics", new StackPanel { Spacing = 8, Children = { _tiles, _statsNote } },
+            DarkTheme.Segmented(["Today", "7 days", "30 days", "All time"], _period, i =>
             {
-                Margin = new Thickness(10),
-                Children = { DarkTheme.Section("History", new StackPanel { Spacing = 4, Children = { _list, _more, _note } }) },
-            },
-        };
-
-        _host.History.Changed += () => Dispatcher.UIThread.Post(() =>
-        {
-            if (IsVisible)
+                _period = i;
+                _dirty = true;
                 Refresh();
-        });
+            })));
+        Add(DarkTheme.Section("Dictations", new StackPanel { Spacing = 4, Children = { _list, _more, _note } }));
 
-        Closing += (_, e) =>
-        {
-            if (_allowClose)
-                return;
-            e.Cancel = true;
-            Hide();
-        };
+        _host.History.Changed += () => Dispatcher.UIThread.Post(() => _dirty = true);
     }
 
-    public void ShowAndActivate()
+    public override void OnShown()
     {
-        // Always: the Today/Yesterday headings move past midnight
         _shown = PageSize;
+        _dirty = true;
         Refresh();
-        Show();
-        WindowState = WindowState.Normal;
-        Activate();
     }
 
-    private void Refresh()
+    public override void Refresh()
+    {
+        // The Today/Yesterday headings and "today" move past midnight
+        if (!_dirty && _shownDay == DateTime.Today)
+            return;
+        _dirty = false;
+        _shownDay = DateTime.Today;
+        RefreshStats();
+        RefreshList();
+    }
+
+    private void RefreshStats()
+    {
+        var stats = _host.Stats;
+        var totals = _period switch
+        {
+            0 => stats.Today(),
+            1 => stats.LastDays(7),
+            2 => stats.LastDays(30),
+            _ => stats.AllTime(),
+        };
+        FillTiles(_tiles, totals);
+
+        var all = stats.AllTime();
+        // Typing at ~40 words/min is a common average
+        var saved = all.Words / 40.0 * 60 - all.SpeakingSec - all.ProcessingSec;
+        _statsNote.Text = $"Counting since {stats.Since.ToLocalTime():d}" +
+                          (saved > 60 ? $" · about {Widgets.FormatDuration(saved)} saved compared with typing at 40 words/min" : "");
+    }
+
+    /// <summary>Four numbers side by side: dictations, words, speaking time, words per minute.</summary>
+    private static void FillTiles(Grid tiles, StatsTotals totals)
+    {
+        tiles.ColumnDefinitions = new ColumnDefinitions("*,*,*,*");
+        tiles.Children.Clear();
+        (string Value, string Label)[] values =
+        [
+            (totals.Dictations.ToString("N0"), "dictations"),
+            (totals.Words.ToString("N0"), "words"),
+            (Widgets.FormatDuration(totals.SpeakingSec), "speaking"),
+            (totals.SpeakingSec > 0 ? totals.WordsPerMinute.ToString("F0") : "–", "words / min"),
+        ];
+        for (var i = 0; i < values.Length; i++)
+        {
+            var tile = new StackPanel
+            {
+                Children =
+                {
+                    DarkTheme.Label(values[i].Value, 20, FontWeight.SemiBold),
+                    DarkTheme.MutedLabel(values[i].Label),
+                },
+            };
+            Grid.SetColumn(tile, i);
+            tiles.Children.Add(tile);
+        }
+    }
+
+    private void RefreshList()
     {
         _list.Children.Clear();
 
@@ -125,8 +165,8 @@ public sealed class HistoryWindow : Window
         : date == DateTime.Today.AddDays(-1) ? "Yesterday"
         : date.ToString("D");
 
-    /// <summary>One dictation: time, text (Show opens it in full), timings. Also used for the main window's recents.</summary>
-    internal static Control Row(DictationRecord r, TranscriptWindow transcript)
+    /// <summary>One dictation: time, text (Show opens it in full), timings.</summary>
+    private static Control Row(DictationRecord r, TranscriptWindow transcript)
     {
         var hasText = !string.IsNullOrEmpty(r.Text);
         var row = new Grid { ColumnDefinitions = new ColumnDefinitions("54,*,Auto,Auto") };
@@ -163,10 +203,4 @@ public sealed class HistoryWindow : Window
     }
 
     private static string NoteText(string note) => string.IsNullOrEmpty(note) ? "No speech" : char.ToUpper(note[0]) + note[1..];
-
-    public void CloseForGood()
-    {
-        _allowClose = true;
-        Close();
-    }
 }

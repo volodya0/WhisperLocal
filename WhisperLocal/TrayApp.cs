@@ -59,6 +59,9 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     {
         public CancellationTokenSource Cancel { get; } = new();
         public string Text { get; set; } = "";
+
+        /// <summary>Full path of the model file.</summary>
+        public string Model { get; init; } = "";
     }
 
     public TrayApp(ConfigManager config)
@@ -73,7 +76,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         _stats = new DictationStats(Path.Combine(AppPaths.DataDir, "stats.json"), _history.Recent(int.MaxValue));
         _stt = new WhisperServerStt(config);
         _llm = new OllamaCleaner(config);
-        _pipeline = new DictationPipeline(config, _stt, _llm);
+        _pipeline = new DictationPipeline(config, new RecognitionRouter(config, _stt), _llm);
         _mainWindow = new MainWindow(this, _transcriptWindow);
         _overlay = new RecordingOverlay(ShowLastTranscript);
 
@@ -126,7 +129,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
 
         if (_mainWindow.HasProblems)
             ShowMainWindow();
-        else if (config.Current.Whisper.StartOnLaunch)
+        else if (config.Current.Whisper.StartOnLaunch && !RecognitionRouter.UsesGemini(config.Current))
             _ = WarmUpWhisperAsync();
     }
 
@@ -171,7 +174,9 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
             items.Add(new SetupItem(SetupState.Ok, $"Model: {name} ({FormatSize(new FileInfo(model).Length)})",
                 "Show Folder", () => OpenPath(Path.GetDirectoryName(model)!)));
         else
-            items.Add(new SetupItem(SetupState.Error, $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
+            // With Gemini the local model is only the fallback
+            items.Add(new SetupItem(RecognitionRouter.UsesGemini(_config.Current) ? SetupState.Warning : SetupState.Error,
+                $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
 
         items.Add(new SetupItem(SetupState.Ok, $"Hotkey: hold {KeyboardHook.Describe(_config.Current.Hotkey.Key)} to dictate"));
         return items;
@@ -221,6 +226,22 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     {
         _lastActivityUtc = DateTime.UtcNow;
         await WarmUpWhisperAsync();
+    }
+
+    public void DownloadModel(string modelPath, string? url = null)
+    {
+        // No language models on Windows yet
+        if (url == null)
+            _ = DownloadModelAsync(AppPaths.Resolve(modelPath));
+    }
+
+    public string? DownloadProgress(string modelPath) =>
+        _download is { } d && d.Model == AppPaths.Resolve(modelPath) ? d.Text : null;
+
+    public void CancelDownload(string modelPath)
+    {
+        if (_download is { } d && d.Model == AppPaths.Resolve(modelPath))
+            d.Cancel.Cancel();
     }
 
     public void CheckForUpdates() => _ = CheckForUpdatesAsync();
@@ -305,7 +326,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
 
         // Do not let the user dictate for nothing: the main window has the Download button
         var modelPath = AppPaths.Resolve(cfg.Whisper.ModelPath);
-        if (!File.Exists(modelPath))
+        if (!File.Exists(modelPath) && !RecognitionRouter.UsesGemini(cfg))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
             ShowModelMissing(new ModelNotFoundException(modelPath));
@@ -485,7 +506,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     {
         if (_download != null)
             return;
-        var download = _download = new Download();
+        var download = _download = new Download { Model = model };
         var name = Path.GetFileName(model);
         var url = ModelDownloader.UrlFor(model);
         download.Text = $"Downloading {name}…";

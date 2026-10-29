@@ -11,6 +11,12 @@
     "DeviceName": "",
     "MaxDurationSec": 120
   },
+  "Recognition": {
+    // "Local" (Whisper on this computer) or "Gemini" (Google's cloud, needs Cloud.GeminiApiKey)
+    "Engine": "Local",
+    // When Gemini fails (no internet, limit used up), transcribe the same recording locally
+    "FallbackToLocal": true
+  },
   "Whisper": {
     "ServerExe": "whisper\\whisper-server.exe",
     // Large v3 Turbo: several times faster than Large v3, almost as accurate; switch in the main window
@@ -133,6 +139,19 @@
     "RestoreDelayMs": 400,
     // When nothing can take text (the desktop, the taskbar), open the transcript to edit and copy instead of pasting
     "ShowWhenNoTextField": true
+  },
+  "Notes": {
+    // Folder with the notes (.md and .txt files); empty = "WhisperLocal Notes" in Documents
+    "Folder": "",
+    // File type of new notes: ".md" or ".txt"
+    "Extension": ".md"
+  },
+  "Cloud": {
+    // Google Gemini API key from https://aistudio.google.com/apikey; set it on the Models page
+    "GeminiApiKey": "",
+    // Gemini model for recognition; "gemini-flash-latest" follows Google's newest Flash model
+    "GeminiModel": "gemini-flash-latest",
+    "TimeoutSec": 30
   },
   "Ui": {
     "ShowOverlay": true,
