@@ -71,7 +71,9 @@ public sealed class MainWindow : Window
         grid.Children.Add(_content);
         Content = grid;
 
-        Select(_home);
+        // Not Select: the page would refresh, and the platform app is still being constructed (it creates this
+        // window in its constructor), so asking it for the setup items would crash; the page refreshes when shown
+        Highlight(_home);
         _refresh.Tick += (_, _) => Refresh();
 
         Closing += (_, e) =>
@@ -124,6 +126,13 @@ public sealed class MainWindow : Window
         if (page == _page)
             return;
         _page?.OnHidden();
+        Highlight(page);
+        page.OnShown();
+    }
+
+    /// <summary>Makes <paramref name="page"/> the visible one and marks it in the sidebar, without refreshing it.</summary>
+    private void Highlight(Page page)
+    {
         _page = page;
         _content.Content = page;
         foreach (var (p, button) in _nav)
@@ -132,7 +141,6 @@ public sealed class MainWindow : Window
             button.Background = selected ? DarkTheme.Brush("#2A2A31") : Brushes.Transparent;
             button.Foreground = selected ? DarkTheme.Text : DarkTheme.Muted;
         }
-        page.OnShown();
     }
 
     // ---- Sidebar ----

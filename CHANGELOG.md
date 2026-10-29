@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 1.0.30 quit right after starting on macOS (the new main window asked the app for its setup checklist while the
+  app was still starting); fixed.
 - Main window redesign: a sidebar with the pages (Home, History, Notes) and the settings (Speech to Text, Notes &
   Translate, Models), with the status always at the bottom. Home has the status and setup checklist, updates and
   files. History and statistics are one page instead of two windows, and
