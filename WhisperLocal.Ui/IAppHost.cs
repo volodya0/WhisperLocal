@@ -43,6 +43,14 @@ public interface IAppHost
     /// <summary>Whether the speech model is loaded (whisper-server running) and a short description.</summary>
     (bool Loaded, string Detail) GetModelMemory();
 
+    /// <summary>
+    /// The models in memory now: a name and a detail (what uses it, how much memory). By default the speech model when
+    /// <see cref="GetModelMemory"/> says it is loaded.
+    /// </summary>
+    IReadOnlyList<(string Name, string Detail)> GetLoadedModels() =>
+        GetModelMemory() is (true, var detail) ? [("Speech model", detail)] : [];
+
+    /// <summary>Unloads every model (frees memory); the next use loads them again.</summary>
     Task UnloadAsync();
     Task LoadAsync();
 

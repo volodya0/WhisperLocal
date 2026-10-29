@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Models → Memory lists the models loaded right now (speech and language model, what uses each and how much memory)
+  with one **Unload All** button and the auto-unload time; the separate Load/Unload of the speech model and the
+  language model's Unload are gone.
+- Speech to Text → Recognition has one **Model** list instead of Engine, Gemini model and Local model: the downloaded
+  local models and, with a Gemini key, the Gemini models; choosing one sets the engine too. The Gemini fallback uses
+  the last local model chosen. Notes & Translate → Listening says which speech model it hears with (the same local
+  model).
+- Models is for managing models only: Download, Cancel and Delete (the model in use cannot be deleted, a first
+  click asks), which feature uses each one, memory, the folder and cloud keys. The Use buttons are gone: models are
+  chosen on the page of the feature that uses them (Speech to Text, Notes & Translate → Listening).
+- macOS 14.2+: listening, notes from what the Mac plays. Left Control + Left Option + L (`Listen.Hotkey`) starts
+  transcribing system audio (a call, a video) into a note with times, in the notes folder, so it shows on the Notes
+  page. A panel above the indicator shows the last sentences and, greyed, the one still being spoken
+  (`Listen.ProvisionalMs`); its menu translates them with the local language model, the translation next to each
+  sentence, and translated lines are written in both languages. It runs until the panel's stop button is clicked.
+  Notes & Translate → Listening has the shortcut and the languages; the menu has "Listen to System Audio".
 - 1.0.30 quit right after starting on macOS (the new main window asked the app for its setup checklist while the
   app was still starting); fixed.
 - Main window redesign: a sidebar with the pages (Home, History, Notes) and the settings (Speech to Text, Notes &

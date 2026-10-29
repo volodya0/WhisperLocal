@@ -87,6 +87,8 @@ internal sealed unsafe class HotkeyTap : IDisposable
     private IntPtr _source;
     private ushort[] _keys = [];
     private bool _active;
+    private ushort[] _triggerKeys = [];
+    private bool _triggerActive;
     private bool _warnedNoPermission;
 
     // Hotkey recording ("Record…" in the main window): every key goes here instead of the hotkey logic
@@ -100,6 +102,9 @@ internal sealed unsafe class HotkeyTap : IDisposable
 
     public event Action? HotkeyDown;
     public event Action? HotkeyUp;
+
+    /// <summary>The trigger shortcut (<see cref="SetTrigger"/>) was pressed; it has no release.</summary>
+    public event Action? TriggerPressed;
 
     /// <summary>Another key was pressed while the hotkey was held (e.g. Ctrl+Cmd+Q).</summary>
     public event Action? HotkeyCancel;
@@ -155,6 +160,18 @@ internal sealed unsafe class HotkeyTap : IDisposable
             return;
         _keys = keys;
         _active = false;
+    }
+
+    /// <summary>
+    /// A second, press-only shortcut (listening): raises <see cref="TriggerPressed"/> when all its keys are down. Its
+    /// non-modifier key is always swallowed then, so Ctrl+Option+L does not type "¬".
+    /// </summary>
+    public void SetTrigger(ushort[] keys)
+    {
+        if (keys.SequenceEqual(_triggerKeys))
+            return;
+        _triggerKeys = keys;
+        _triggerActive = false;
     }
 
     /// <summary>
@@ -259,7 +276,7 @@ internal sealed unsafe class HotkeyTap : IDisposable
             return evt;
         if (_recordDone != null)
             return Record(type, evt);
-        if (_keys.Length == 0)
+        if (_keys.Length == 0 && _triggerKeys.Length == 0)
             return evt;
 
         var code = (ushort)CGEventGetIntegerValueField(evt, kCGKeyboardEventKeycode);
@@ -278,10 +295,29 @@ internal sealed unsafe class HotkeyTap : IDisposable
             isUp = type == kCGEventKeyUp;
         }
 
+        var swallowTrigger = false;
+        if (Array.IndexOf(_triggerKeys, code) >= 0)
+        {
+            var wasTriggerActive = _triggerActive;
+            if (isDown && !_triggerActive && OtherKeysHeld(_triggerKeys, code, flags))
+            {
+                _triggerActive = true;
+                _context.Post(_ => TriggerPressed?.Invoke(), null);
+            }
+            else if (isUp)
+            {
+                _triggerActive = false;
+            }
+            // Its auto-repeat and its release too, so the app sees nothing of it
+            swallowTrigger = (_triggerActive || wasTriggerActive) && !ModifierMasks.ContainsKey(code);
+        }
+        if (_keys.Length == 0)
+            return swallowTrigger ? IntPtr.Zero : evt;
+
         if (Array.IndexOf(_keys, code) >= 0)
         {
             var wasActive = _active;
-            var activating = isDown && !_active && OtherKeysHeld(code, flags);
+            var activating = isDown && !_active && OtherKeysHeld(_keys, code, flags);
 
             // The non-modifier key of the hotkey (F13, or "/" in Option+/) is swallowed while the hotkey is in use,
             // so it does not type into the app (Option+/ would insert "÷"); on its own it keeps working normally.
@@ -309,7 +345,7 @@ internal sealed unsafe class HotkeyTap : IDisposable
             _context.Post(_ => HotkeyCancel?.Invoke(), null);
         }
 
-        return evt;
+        return swallowTrigger ? IntPtr.Zero : evt;
     }
 
     private IntPtr Record(uint type, IntPtr evt)
@@ -353,12 +389,12 @@ internal sealed unsafe class HotkeyTap : IDisposable
     }
 
     /// <summary>
-    /// Physical state of the other hotkey keys: modifiers from the event's flags, other keys from the HID state.
+    /// Physical state of the other keys of <paramref name="keys"/>: modifiers from the event's flags, other keys from the HID state.
     /// Asking the system (instead of tracking downs/ups) avoids stuck keys when a key-up is missed.
     /// </summary>
-    private bool OtherKeysHeld(ushort current, ulong flags)
+    private static bool OtherKeysHeld(ushort[] keys, ushort current, ulong flags)
     {
-        foreach (var k in _keys)
+        foreach (var k in keys)
         {
             if (k == current)
                 continue;

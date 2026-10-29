@@ -9,6 +9,7 @@ using WhisperLocal.Mac.Interop;
 using WhisperLocal.Mac.Output;
 using WhisperLocal.Mac.Ui;
 using WhisperLocal.Mac.Updates;
+using WhisperLocal.Notes;
 using WhisperLocal.Pipeline;
 using WhisperLocal.Stt;
 using WhisperLocal.Text;
@@ -39,6 +40,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private readonly IntPtr _enabledItem;
     private readonly IntPtr _unloadItem;
     private readonly IntPtr _transcriptItem;
+    private readonly IntPtr _listenItem;
     private readonly HotkeyTap _hotkey;
     private readonly MacAudioRecorder _recorder = new();
     private readonly WhisperServerStt _stt;
@@ -48,6 +50,9 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private readonly Autocompleter _autocompleter;
     private readonly LiveAutocomplete _liveAutocomplete;
     private readonly Polisher _polisher;
+    private readonly SystemAudioTap _systemAudio = new();
+    private readonly LiveListener _listener;
+    private readonly ListenPanel _listenPanel;
     private readonly MacTextInserter _inserter = new();
     private readonly RecordingOverlay _overlay;
     private readonly AutocompletePanel _completionPanel;
@@ -68,6 +73,10 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private CancellationTokenSource? _liveCompletion;
     private CancellationTokenSource? _polishRequest;
     private (string Original, string Polished, FrontmostApp? Target, long PastedAt)? _proposal;
+    private CancellationTokenSource? _listening;
+    private Task? _listenTask;
+    private ListenNotes? _notes;
+    private long _listenStartedAt;
     private bool _disposed;
 
     /// <summary>A model download in progress: what the setup line shows, and how to cancel it.</summary>
@@ -95,6 +104,12 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _autocompleter = new Autocompleter(config, _llama);
         _liveAutocomplete = new LiveAutocomplete(config, _stt, _autocompleter);
         _polisher = new Polisher(config, _llama);
+        _listener = new LiveListener(config, _stt, new Translator(config, _llama));
+        _listenPanel = new ListenPanel(_ui, StopListening, OpenNotes, ChooseListenLanguage, ListenHint);
+        _listener.Heard += _listenPanel.ShowLine;
+        _listener.Finished += OnListenLineFinished;
+        _listener.Failed += _listenPanel.ShowProblem;
+        _listener.Provisional += _listenPanel.ShowProvisional;
         _overlay = new RecordingOverlay(_ui, ShowLastTranscript);
         _completionPanel = new AutocompletePanel();
         _polishPanel = new PolishPanel(_ui, () => _ = InsertProposalAsync(), CopyProposal);
@@ -103,6 +118,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _menu = new StatusMenu();
         _menu.AddItem("Open WhisperLocal…", ShowMainWindow);
         _transcriptItem = _menu.AddItem("Show Last Transcript", ShowLastTranscript);
+        _listenItem = _menu.AddItem("Listen to System Audio", ToggleListening);
         _menu.AddItem("Check for Updates…", () => _ = CheckForUpdatesAsync());
         _menu.AddSeparator();
         _enabledItem = _menu.AddItem("Enabled", ToggleEnabled);
@@ -116,6 +132,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             // "Unload from memory" is available only while something is loaded
             StatusMenu.SetEnabled(_unloadItem, IsAnythingLoaded);
             StatusMenu.SetEnabled(_transcriptItem, _lastTranscript.Length > 0);
+            ObjC.WithPool(() => ObjC.Send(_listenItem, ObjC.Sel("setTitle:"),
+                ObjC.Str(_listening != null ? "Stop Listening" : "Listen to System Audio")));
         };
 
         RequestAccessibility();
@@ -123,6 +141,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _hotkey.HotkeyDown += OnHotkeyDown;
         _hotkey.HotkeyUp += OnHotkeyUp;
         _hotkey.HotkeyCancel += OnHotkeyCancel;
+        _hotkey.TriggerPressed += StartListening;
         _hotkey.PermissionMissing += () => Dialogs.Notify(
             "Allow WhisperLocal in System Settings → Privacy & Security → Accessibility. The hotkey starts working as soon as it is allowed.");
         _hotkey.Installed += () => Dialogs.Notify($"Ready: hold {HotkeyTap.Describe(_config.Current.Hotkey.Key)} to dictate");
@@ -212,6 +231,10 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             ? new SetupItem(SetupState.Ok, $"Hotkey: hold {hotkey} to dictate")
             : new SetupItem(SetupState.Pending, $"Hotkey {hotkey}: waiting for Accessibility"));
 
+        if (SystemAudioTap.IsSupported && _config.Current.Listen.Hotkey.Trim().Length > 0)
+            items.Add(new SetupItem(SetupState.Ok,
+                $"Listening: press {HotkeyTap.Describe(_config.Current.Listen.Hotkey)} to take notes of what the Mac plays"));
+
         return items;
     }
 
@@ -237,8 +260,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
                 : new SetupItem(SetupState.Error, $"Model not found: {model}", "Show Folder", () => OpenFolder(model)));
         else if (_llama.IsLoaded)
             items.Add(new SetupItem(SetupState.Ok,
-                $"{name}: loaded" + (_llama.MemoryBytes is { } bytes ? $", llama-server uses {FormatSize(bytes)}" : ""),
-                "Unload", _llama.Unload));
+                // Unloading is in Models → Memory, with everything else in memory
+                $"{name}: loaded" + (_llama.MemoryBytes is { } bytes ? $", llama-server uses {FormatSize(bytes)}" : "")));
         else
             items.Add(new SetupItem(SetupState.Ok,
                 $"{name} ({FormatSize(new FileInfo(model).Length)}): loads when you start dictating", "Show Folder", () => OpenFolder(model)));
@@ -281,6 +304,34 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             detail += $", whisper-server uses {FormatSize(bytes)}";
         return (true, detail);
     }
+
+    public IReadOnlyList<(string Name, string Detail)> GetLoadedModels()
+    {
+        var cfg = _config.Current;
+        var loaded = new List<(string, string)>();
+        if (_stt.IsLoaded)
+        {
+            var name = PlainName(WhisperModels.Find(cfg.Whisper.ModelPath)?.Title) ?? Path.GetFileName(cfg.Whisper.ModelPath);
+            var uses = _listening != null ? "Speech recognition: dictation and listening" : "Speech recognition";
+            loaded.Add((name, uses + (_stt.MemoryBytes is { } bytes ? $" · {FormatSize(bytes)}" : "")));
+        }
+        if (_llama.IsLoaded)
+        {
+            var name = PlainName(LlmModels.Find(LlamaServer.ResolveModel(cfg.LocalLlm))?.Title) ?? Path.GetFileName(cfg.LocalLlm.ModelPath);
+            var uses = (cfg.Polish.Enabled, _listening != null && _listener.TranslateTo.Length > 0) switch
+            {
+                (true, true) => "Language model: grammar check and translation",
+                (false, true) => "Language model: translation",
+                _ => "Language model: grammar check",
+            };
+            loaded.Add((name, uses + (_llama.MemoryBytes is { } bytes ? $" · {FormatSize(bytes)}" : "")));
+        }
+        return loaded;
+    }
+
+    /// <summary>"Large v3 (most accurate)" → "Large v3": the hint helps choosing, not reading what is loaded.</summary>
+    private static string? PlainName(string? title) =>
+        title == null ? null : System.Text.RegularExpressions.Regex.Replace(title, @"\s*\([^)]*\)\s*$", "");
 
     public Task UnloadAsync() => UnloadFromMemoryAsync();
 
@@ -361,6 +412,15 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             Dialogs.Notify(ex.Message);
         }
         _hotkey.SuppressKey = cfg.Hotkey.SuppressKey;
+        try
+        {
+            _hotkey.SetTrigger(cfg.Listen.Hotkey.Trim().Length == 0 ? [] : HotkeyTap.ParseHotkey(cfg.Listen.Hotkey));
+        }
+        catch (ArgumentException ex)
+        {
+            Log.Error($"Listen.Hotkey: {ex.Message}");
+            Dialogs.Notify($"Listen.Hotkey: {ex.Message}");
+        }
 
         if (!cfg.Autocomplete.IsOn)
             StopAutocomplete();
@@ -532,17 +592,21 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
     // ---- Language model: autocomplete and grammar check ----
 
-    private bool IsLanguageModelWanted => _config.Current.Autocomplete.IsOn || _config.Current.Polish.Enabled;
+    private bool IsLanguageModelWanted =>
+        _config.Current.Autocomplete.IsOn || _config.Current.Polish.Enabled || (_listening != null && _listener.TranslateTo.Length > 0);
 
-    /// <summary>A feature is on and llama-server and the model are in place (the server starts on demand).</summary>
-    private bool IsLanguageModelReady
+    /// <summary>llama-server and the model are in place (the server starts on demand).</summary>
+    private bool IsLanguageModelInstalled
     {
         get
         {
             var c = _config.Current.LocalLlm;
-            return IsLanguageModelWanted && File.Exists(LlamaServer.ResolveServerExe(c)) && File.Exists(LlamaServer.ResolveModel(c));
+            return File.Exists(LlamaServer.ResolveServerExe(c)) && File.Exists(LlamaServer.ResolveModel(c));
         }
     }
+
+    /// <summary>A feature is on and the language model is installed.</summary>
+    private bool IsLanguageModelReady => IsLanguageModelWanted && IsLanguageModelInstalled;
 
     /// <summary>On hotkey press: loads the model while the user speaks.</summary>
     private async Task PreloadLanguageModelAsync()
@@ -678,6 +742,170 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         Dialogs.Notify("Polished text copied");
     }
 
+    // ---- Listening: system audio → notes, optionally translated ----
+
+    /// <summary>Listening notes go with the other notes, so the Notes page lists them.</summary>
+    private string NotesFolder => NoteFiles.Folder(_config.Current.Notes);
+
+    private void ToggleListening()
+    {
+        if (_listening != null)
+            StopListening();
+        else
+            StartListening();
+    }
+
+    /// <summary>The listening shortcut: starts listening; while listening it only brings the indicator back.</summary>
+    private void StartListening()
+    {
+        if (_listening != null)
+        {
+            _listenPanel.BringToFront();
+            return;
+        }
+        if (!SystemAudioTap.IsSupported)
+        {
+            Dialogs.Show("Listening", "Listening to what the Mac plays needs macOS 14.2 or later.", Dialogs.Style.Informational);
+            return;
+        }
+
+        var cfg = _config.Current;
+        var modelPath = AppPaths.Resolve(cfg.Whisper.ModelPath);
+        if (!File.Exists(modelPath))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
+            ShowModelMissing(new ModelNotFoundException(modelPath));
+            return;
+        }
+
+        try
+        {
+            _systemAudio.Start();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Failed to start listening to system audio", ex);
+            Dialogs.Notify($"Cannot listen to system audio: {ex.Message}");
+            return;
+        }
+
+        // Translation needs the language model; without it the choice waits until it is downloaded
+        var language = IsLanguageModelInstalled ? cfg.Listen.TranslateTo.Trim() : "";
+        _listener.TranslateTo = language;
+        _notes = new ListenNotes(NotesFolder, cfg.Notes.Extension);
+        var listening = _listening = new CancellationTokenSource();
+        _listenStartedAt = Stopwatch.GetTimestamp();
+        _lastActivityUtc = DateTime.UtcNow;
+        Log.Info($"Listening started{(language.Length > 0 ? $", translating into {language}" : "")}");
+        _listenPanel.Show(cfg.Listen.Languages, language);
+        UpdateMenuState();
+        _ = WarmUpWhisperAsync();
+        if (language.Length > 0)
+            _ = PreloadLanguageModelAsync();
+        _listenTask = RunListeningAsync(listening);
+    }
+
+    private async Task RunListeningAsync(CancellationTokenSource listening)
+    {
+        try
+        {
+            await _listener.RunAsync(_systemAudio.Drain, listening.Token);
+        }
+        catch (Exception ex)
+        {
+            ReportError("Listening failed", ex);
+        }
+        finally
+        {
+            _systemAudio.Stop();
+            _listenPanel.Hide();
+            var notes = _notes;
+            _notes = null;
+            _listening = null;
+            _listenTask = null;
+            listening.Dispose();
+            _lastActivityUtc = DateTime.UtcNow;
+            UpdateMenuState();
+            Log.Info($"Listening stopped: {notes?.Lines ?? 0} lines");
+            try
+            {
+                notes?.Close();
+                if (notes is { Lines: > 0 })
+                    Dialogs.Notify($"Notes saved: {Path.GetFileName(notes.FilePath)}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Saving the notes failed", ex);
+            }
+        }
+    }
+
+    /// <summary>The indicator's stop button: the capture stops now, what was already heard is still finished.</summary>
+    private void StopListening()
+    {
+        if (_listening is not { IsCancellationRequested: false } listening)
+            return;
+        listening.Cancel();
+        _systemAudio.Stop();
+        _listenPanel.ShowFinishing();
+    }
+
+    private void OnListenLineFinished(ListenLine line)
+    {
+        _lastActivityUtc = DateTime.UtcNow;
+        _listenPanel.ShowLine(line);
+        try
+        {
+            _notes?.Add(line);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Writing the notes failed", ex);
+            _listenPanel.ShowProblem($"cannot write the notes: {ex.Message}");
+        }
+    }
+
+    /// <summary>The indicator's language menu: applies from the next line on, and is remembered for the next time.</summary>
+    private bool ChooseListenLanguage(string code)
+    {
+        if (code.Length > 0 && !IsLanguageModelInstalled)
+        {
+            Dialogs.Notify("Translation uses a language model: download one on the Models page");
+            _mainWindow.ShowModels();
+            return false;
+        }
+        _listener.TranslateTo = code;
+        Log.Info(code.Length > 0 ? $"Listening: translating into {code}" : "Listening: original only");
+        if (code.Length > 0)
+            _ = PreloadLanguageModelAsync();
+        try
+        {
+            ConfigEditor.SetValue(_config.FilePath, "Listen", "TranslateTo", code);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Cannot remember the translation language: {ex.Message}");
+        }
+        return true;
+    }
+
+    /// <summary>While nothing was heard for a few seconds: most likely System Audio Recording is not allowed.</summary>
+    private string? ListenHint()
+    {
+        if (_listening == null || _systemAudio.HeardAnything || Stopwatch.GetElapsedTime(_listenStartedAt) < TimeSpan.FromSeconds(5))
+            return null;
+        return "No sound yet. If something is playing, allow WhisperLocal in System Settings → Privacy & Security → " +
+               "Screen & System Audio Recording (System Audio Recording Only).";
+    }
+
+    private void OpenNotes()
+    {
+        if (_notes is { Lines: > 0 } notes)
+            Dialogs.Open(notes.FilePath);
+        else
+            OpenFolder(Path.Combine(NotesFolder, "_"));
+    }
+
     private void ToggleEnabled()
     {
         _enabled = !_enabled;
@@ -695,6 +923,11 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         // A running dictation finishes first; the idle timer or the user can unload afterwards
         if (_state == State.Processing)
             return;
+        if (_listenTask is { } listening)
+        {
+            StopListening();
+            await listening;
+        }
         if (_state == State.Recording)
         {
             await _recorder.StopAsync();
@@ -716,7 +949,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private async void CheckIdle()
     {
         var minutes = _config.Current.Memory.IdleUnloadMinutes;
-        if (_disposed || minutes <= 0 || _state != State.Idle || !IsAnythingLoaded)
+        if (_disposed || minutes <= 0 || _state != State.Idle || _listening != null || !IsAnythingLoaded)
             return;
         if (DateTime.UtcNow - _lastActivityUtc < TimeSpan.FromMinutes(minutes))
             return;
@@ -901,6 +1134,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         {
             State.Recording => (StatusMenu.Icon.Recording, "WhisperLocal: recording"),
             State.Processing => (StatusMenu.Icon.Processing, "WhisperLocal: processing"),
+            _ when _listening != null => (StatusMenu.Icon.Idle, "WhisperLocal: listening to system audio"),
             _ => (StatusMenu.Icon.Idle, $"WhisperLocal: hold {HotkeyTap.Describe(_config.Current.Hotkey.Key)} to dictate"),
         };
         _menu.SetState(icon, text);
@@ -932,6 +1166,10 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _llmDownload?.Cancel.Cancel();
         _liveCompletion?.Cancel();
         _polishRequest?.Cancel();
+        _listening?.Cancel();
+        _systemAudio.Dispose();
+        _notes?.Close();
+        _notes = null;
         _idleTimer.Dispose();
         _hotkey.Dispose();
         _recorder.Dispose();
@@ -941,6 +1179,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _overlay.Dispose();
         _completionPanel.Dispose();
         _polishPanel.Dispose();
+        _listenPanel.Dispose();
         try
         {
             _mainWindow.CloseForGood();

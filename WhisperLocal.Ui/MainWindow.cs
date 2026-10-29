@@ -52,7 +52,7 @@ public sealed class MainWindow : Window
         _home = new HomePage(host);
         var notes = new NotesPage(host);
         var speech = new SpeechPage(host, () => Select(_models));
-        var notesSettings = new NotesSettingsPage(host);
+        var notesSettings = new NotesSettingsPage(host, () => Select(_models));
 
         var nav = new StackPanel { Spacing = 2 };
         nav.Children.Add(NavButton(_home, HomeIcon));
@@ -110,6 +110,15 @@ public sealed class MainWindow : Window
         // Whatever blocks dictation is on Home
         if (HasProblems)
             Select(_home);
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    /// <summary>Opens the window on the Models page (e.g. a feature needs a model that is not downloaded).</summary>
+    public void ShowModels()
+    {
+        Select(_models);
         Show();
         WindowState = WindowState.Normal;
         Activate();

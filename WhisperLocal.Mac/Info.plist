@@ -29,5 +29,7 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>WhisperLocal records your voice while you hold the hotkey and transcribes it locally.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>WhisperLocal listens to what your Mac plays while you take notes, and transcribes it locally.</string>
 </dict>
 </plist>

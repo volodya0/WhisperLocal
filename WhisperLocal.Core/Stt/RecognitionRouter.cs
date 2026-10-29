@@ -22,11 +22,12 @@ public sealed class RecognitionRouter(ConfigManager config, ISpeechToText local)
 
     public Task WarmUpAsync(CancellationToken ct) => UsesGemini(config.Current) ? Task.CompletedTask : local.WarmUpAsync(ct);
 
-    public async Task<string> TranscribeAsync(byte[] wav, CancellationToken ct)
+    /// <remarks>The language and prompt overrides reach local recognition only; Gemini follows the config.</remarks>
+    public async Task<string> TranscribeAsync(byte[] wav, CancellationToken ct, string? language = null, string? prompt = null)
     {
         var c = config.Current;
         if (!UsesGemini(c))
-            return await local.TranscribeAsync(wav, ct);
+            return await local.TranscribeAsync(wav, ct, language, prompt);
 
         _lastCloudUtc = DateTime.UtcNow;
         try
@@ -39,7 +40,7 @@ public sealed class RecognitionRouter(ConfigManager config, ISpeechToText local)
         catch (GeminiException ex) when (c.Recognition.FallbackToLocal)
         {
             Log.Warn($"Gemini recognition failed ({ex.Message}), transcribing locally");
-            return await local.TranscribeAsync(wav, ct);
+            return await local.TranscribeAsync(wav, ct, language, prompt);
         }
     }
 

@@ -9,8 +9,9 @@ using WhisperLocal.Stt;
 namespace WhisperLocal.Ui.Pages;
 
 /// <summary>
-/// Speech to text settings: the hotkey, recognition (local Whisper or Gemini, language, models) and post-processing (the
-/// grammar check and its language model, the corrections dictionary). Models are downloaded on the Models page.
+/// Speech to text settings: the hotkey, recognition (one model chosen from those ready to use: the downloaded local
+/// models and, with an API key, the cloud models; the language) and post-processing (the grammar check and its language
+/// model, the corrections dictionary). Models are downloaded and cloud keys added on the Models page.
 /// </summary>
 internal sealed class SpeechPage : Page
 {
@@ -19,19 +20,16 @@ internal sealed class SpeechPage : Page
     private readonly Button _record;
     private readonly Note _hotkeyNote = new();
     private readonly ComboBox _languages = DarkTheme.Dropdown(228);
-    private readonly ComboBox _engines = DarkTheme.Dropdown(250);
-    private readonly ComboBox _geminiModels = DarkTheme.Dropdown(250);
-    private readonly Control _geminiModelRow;
+    private readonly ComboBox _models = DarkTheme.Dropdown(300);
     private readonly CheckBox _fallback = new()
     {
         Content = "If Gemini fails (no internet, limit used up), recognise on this computer",
         FontSize = 13,
         Foreground = DarkTheme.Text,
     };
-    private readonly Grid _keyMissing = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
     private readonly TextBlock _cloudNote = DarkTheme.MutedLabel("Recordings are sent to Google for recognition.", 11);
-    private readonly ComboBox _speechModels = DarkTheme.Dropdown(250);
-    private readonly Grid _speechMissing = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+    private readonly TextBlock _modelProblem = DarkTheme.Label("", 12, brush: DarkTheme.Warning);
+    private readonly Grid _modelProblemRow = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
     private readonly Note _recognitionNote = new();
     private readonly CheckBox _polish = new()
     {
@@ -46,14 +44,11 @@ internal sealed class SpeechPage : Page
 
     private List<HotkeyPreset> _hotkeyChoices = [];
     private List<(string Title, string Value)> _languageChoices = [];
-    private List<string> _speechModelPaths = [];
-    private List<string> _geminiModelIds = [];
+    private List<ModelChoice> _modelChoices = [];
     private List<string> _llmModelPaths = [];
     private string? _shownHotkey;
     private string? _shownLanguage;
-    private string? _shownSpeechModel;
-    private string? _shownEngine;
-    private string? _shownGeminiModel;
+    private string? _shownModels;
     private bool? _shownFallback;
     private string? _shownLlmModel;
     private string? _shownLlmStatus;
@@ -73,21 +68,22 @@ internal sealed class SpeechPage : Page
             Children = { Widgets.Fields(("Hotkey", _hotkeys), ("", _record)), _hotkeyNote.Line },
         }));
 
-        WarningRow(_speechMissing, "The local model is not downloaded yet: download it on the Models page.", showModels);
-        WarningRow(_keyMissing, "Gemini needs an API key: add it on the Models page. Until then recognition runs locally.", showModels);
-        _engines.ItemsSource = Engines.Select(e => e.Title).ToList();
-        _geminiModelRow = Widgets.Fields(("Gemini model", _geminiModels));
+        _modelProblem.TextWrapping = Avalonia.Media.TextWrapping.Wrap;
+        _modelProblem.VerticalAlignment = VerticalAlignment.Center;
+        _modelProblemRow.Children.Add(_modelProblem);
+        var models = DarkTheme.Button("Models", showModels, small: true);
+        models.Margin = new Thickness(12, 0, 0, 0);
+        Grid.SetColumn(models, 1);
+        _modelProblemRow.Children.Add(models);
+        ToolTip.SetTip(_models, "The models ready to use: downloaded ones, and cloud ones once their key is added on the Models page");
         Add(DarkTheme.Section("Recognition", new StackPanel
         {
             Spacing = 4,
             Children =
             {
-                Widgets.Fields(("Engine", _engines), ("Language", _languages)),
-                _keyMissing,
-                _geminiModelRow,
+                Widgets.Fields(("Model", _models), ("Language", _languages)),
+                _modelProblemRow,
                 _fallback,
-                Widgets.Fields(("Local model", _speechModels)),
-                _speechMissing,
                 _cloudNote,
                 _recognitionNote.Line,
             },
@@ -111,19 +107,7 @@ internal sealed class SpeechPage : Page
 
         _hotkeys.SelectionChanged += (_, _) => OnHotkeySelected();
         _languages.SelectionChanged += (_, _) => OnLanguageSelected();
-        _speechModels.SelectionChanged += (_, _) => OnSpeechModelSelected();
-        _engines.SelectionChanged += (_, _) =>
-        {
-            var i = _engines.SelectedIndex;
-            if (!_updating && i >= 0)
-                Widgets.Save(_host, "Recognition", "Engine", Engines[i].Value, _recognitionNote);
-        };
-        _geminiModels.SelectionChanged += (_, _) =>
-        {
-            var i = _geminiModels.SelectedIndex;
-            if (!_updating && i >= 0 && i < _geminiModelIds.Count)
-                Widgets.Save(_host, "Cloud", "GeminiModel", _geminiModelIds[i], _recognitionNote);
-        };
+        _models.SelectionChanged += (_, _) => OnModelSelected();
         _fallback.IsCheckedChanged += (_, _) =>
         {
             if (!_updating)
@@ -139,8 +123,7 @@ internal sealed class SpeechPage : Page
         _updating = true;
         RefreshHotkey(cfg.Hotkey.Key);
         RefreshLanguage(cfg.Whisper.Language);
-        RefreshEngine(cfg);
-        RefreshSpeechModel(cfg);
+        RefreshModels(cfg);
         if (_host.HasGrammarCheck)
             RefreshPolish(cfg);
         _updating = false;
@@ -274,99 +257,110 @@ internal sealed class SpeechPage : Page
         Widgets.Save(_host, "Whisper", "Language", _languageChoices[i].Value, _recognitionNote);
     }
 
-    // ---- Engine ----
+    // ---- Model: one list of what is ready to use, local and cloud ----
 
-    private static readonly (string Title, string Value)[] Engines =
-        [("On this computer (Whisper)", "Local"), ("Google Gemini (cloud)", "Gemini")];
+    /// <summary>A recognition model: on this computer (<paramref name="Value"/> is Whisper.ModelPath) or Gemini (Cloud.GeminiModel).</summary>
+    private sealed record ModelChoice(string Title, bool Cloud, string Value, string Hint);
 
     private static readonly (string Title, string Id, string Hint)[] GeminiModels =
     [
-        ("Gemini Flash (latest)", "gemini-flash-latest", "Google's newest Flash model: accurate, a second or two per dictation."),
-        ("Gemini Flash-Lite (latest)", "gemini-flash-lite-latest", "Smaller and faster, a bit less accurate; higher free limits."),
+        ("Gemini Flash", "gemini-flash-latest", "Google's newest Flash model: accurate, a second or two per dictation."),
+        ("Gemini Flash-Lite", "gemini-flash-lite-latest", "Smaller and faster, a bit less accurate; higher free limits."),
     ];
 
-    private void RefreshEngine(AppConfig cfg)
+    private void RefreshModels(AppConfig cfg)
     {
-        var gemini = string.Equals(cfg.Recognition.Engine, "Gemini", StringComparison.OrdinalIgnoreCase);
-        if (cfg.Recognition.Engine != _shownEngine)
+        var gemini = RecognitionRouter.UsesGemini(cfg);
+        var wantsGemini = string.Equals(cfg.Recognition.Engine, "Gemini", StringComparison.OrdinalIgnoreCase);
+        var hasKey = cfg.Cloud.GeminiApiKey.Trim().Length > 0;
+        var localPath = cfg.Whisper.ModelPath;
+        var localReady = File.Exists(AppPaths.Resolve(localPath));
+        var local = WhisperModels.Find(localPath);
+        var localName = local?.Title ?? Path.GetFileName(localPath);
+
+        // Rebuilt when the choice or what is available changes (a download finishing, a key added)
+        var downloaded = WhisperModels.Catalog.Where(m => File.Exists(AppPaths.Resolve("models/" + m.File))).ToList();
+        var signature = $"{cfg.Recognition.Engine}|{localPath}|{cfg.Cloud.GeminiModel}|{hasKey}|{localReady}|{string.Join(",", downloaded.Select(m => m.File))}";
+        if (signature != _shownModels)
         {
-            _shownEngine = cfg.Recognition.Engine;
-            _engines.SelectedIndex = gemini ? 1 : 0;
-        }
-        if (cfg.Cloud.GeminiModel != _shownGeminiModel)
-        {
-            _shownGeminiModel = cfg.Cloud.GeminiModel;
-            var titles = GeminiModels.Select(m => m.Title).ToList();
-            _geminiModelIds = GeminiModels.Select(m => m.Id).ToList();
-            var index = _geminiModelIds.IndexOf(cfg.Cloud.GeminiModel);
-            if (index < 0)
+            _shownModels = signature;
+            _modelChoices = downloaded
+                .Select(m => new ModelChoice($"{m.Title} · on this computer", false, "models/" + m.File, m.Hint))
+                .ToList();
+            if (local == null && localReady)
+                _modelChoices.Add(new ModelChoice($"{localName} · on this computer", false, localPath, "Set in the config (Whisper.ModelPath)."));
+            if (hasKey)
+                _modelChoices.AddRange(GeminiModels.Select(m => new ModelChoice($"{m.Title} · Google cloud", true, m.Id, m.Hint)));
+
+            // The current choice is always listed, even when it is not ready, so the setting stays visible
+            int index;
+            if (wantsGemini)
             {
-                titles.Add(cfg.Cloud.GeminiModel);
-                _geminiModelIds.Add(cfg.Cloud.GeminiModel);
-                index = titles.Count - 1;
+                index = _modelChoices.FindIndex(c => c.Cloud && c.Value == cfg.Cloud.GeminiModel);
+                if (index < 0)
+                {
+                    var known = GeminiModels.FirstOrDefault(m => m.Id == cfg.Cloud.GeminiModel);
+                    var title = known.Title ?? cfg.Cloud.GeminiModel;
+                    _modelChoices.Add(new ModelChoice(hasKey ? $"{title} · Google cloud" : $"{title} · needs an API key", true,
+                        cfg.Cloud.GeminiModel, known.Hint ?? "Set in the config (Cloud.GeminiModel): any Gemini model that accepts audio."));
+                    index = _modelChoices.Count - 1;
+                }
             }
-            _geminiModels.ItemsSource = titles;
-            _geminiModels.SelectedIndex = index;
-            ToolTip.SetTip(_geminiModels, index < GeminiModels.Length
-                ? GeminiModels[index].Hint
-                : "Set in the config (Cloud.GeminiModel): any Gemini model that accepts audio.");
+            else
+            {
+                index = _modelChoices.FindIndex(c => !c.Cloud && WhisperModels.Find(c.Value) == local && (local != null || c.Value == localPath));
+                if (index < 0)
+                {
+                    _modelChoices.Add(new ModelChoice($"{localName} · not downloaded", false, localPath, local?.Hint ?? "Set in the config (Whisper.ModelPath)."));
+                    index = _modelChoices.Count - 1;
+                }
+            }
+            _models.ItemsSource = _modelChoices.Select(c => c.Title).ToList();
+            _models.SelectedIndex = index;
+            ToolTip.SetTip(_models, _modelChoices[index].Hint);
         }
+
         if (cfg.Recognition.FallbackToLocal != _shownFallback)
         {
             _shownFallback = cfg.Recognition.FallbackToLocal;
             _fallback.IsChecked = cfg.Recognition.FallbackToLocal;
         }
+        // The fallback uses the last local model chosen
+        _fallback.Content = localReady
+            ? $"If Gemini fails (no internet, limit used up), recognise on this computer with {localName}"
+            : "If Gemini fails (no internet, limit used up), recognise on this computer (no local model downloaded)";
+        _fallback.IsVisible = _cloudNote.IsVisible = gemini;
 
-        var hasKey = cfg.Cloud.GeminiApiKey.Trim().Length > 0;
-        _keyMissing.IsVisible = gemini && !hasKey;
-        _geminiModelRow.IsVisible = _fallback.IsVisible = _cloudNote.IsVisible = gemini && hasKey;
+        // Checked every time: the line goes away when the download finishes or the key is added
+        string? problem = null;
+        if (wantsGemini && !hasKey)
+            problem = "Gemini needs an API key: add it on the Models page. Until then recognition runs on this computer.";
+        else if ((!gemini || cfg.Recognition.FallbackToLocal) && !localReady && _host.DownloadProgress(localPath) == null)
+            problem = _modelChoices.Count == 0 || (_modelChoices.Count == 1 && !File.Exists(AppPaths.Resolve(_modelChoices[0].Value)))
+                ? "No model is ready yet: download one, or add a cloud key, on the Models page."
+                : $"{localName} is not downloaded yet: download it on the Models page, or choose another model.";
+        _modelProblemRow.IsVisible = problem != null;
+        _modelProblem.Text = problem ?? "";
     }
 
-    /// <summary>A warning line with a button that opens the Models page.</summary>
-    private static void WarningRow(Grid row, string text, Action showModels)
+    private void OnModelSelected()
     {
-        row.Children.Add(DarkTheme.Label(text, 12, brush: DarkTheme.Warning));
-        var models = DarkTheme.Button("Models", showModels, small: true);
-        models.Margin = new Thickness(12, 0, 0, 0);
-        Grid.SetColumn(models, 1);
-        row.Children.Add(models);
-    }
-
-    // ---- Speech model ----
-
-    private void RefreshSpeechModel(AppConfig cfg)
-    {
-        var path = cfg.Whisper.ModelPath;
-        if (path != _shownSpeechModel)
-        {
-            _shownSpeechModel = path;
-            var titles = WhisperModels.Catalog.Select(m => $"{m.Title} · {m.Size}").ToList();
-            _speechModelPaths = WhisperModels.Catalog.Select(m => "models/" + m.File).ToList();
-            var known = WhisperModels.Find(path);
-            var index = known != null ? WhisperModels.Catalog.ToList().IndexOf(known) : -1;
-            if (index < 0)
-            {
-                titles.Add($"Custom: {Path.GetFileName(path)}");
-                _speechModelPaths.Add(path);
-                index = titles.Count - 1;
-            }
-            _speechModels.ItemsSource = titles;
-            _speechModels.SelectedIndex = index;
-            ToolTip.SetTip(_speechModels, known?.Hint ?? "Set in the config (Whisper.ModelPath).");
-        }
-        // Checked every time: the line goes away when the download finishes
-        // With Gemini and no fallback the local model is not needed
-        var needed = !RecognitionRouter.UsesGemini(cfg) || cfg.Recognition.FallbackToLocal;
-        _speechMissing.IsVisible = needed && !File.Exists(AppPaths.Resolve(path)) && _host.DownloadProgress(path) == null;
-    }
-
-    private void OnSpeechModelSelected()
-    {
-        var i = _speechModels.SelectedIndex;
-        if (_updating || i < 0 || i >= _speechModelPaths.Count)
+        var i = _models.SelectedIndex;
+        if (_updating || i < 0 || i >= _modelChoices.Count)
             return;
-        // whisper-server restarts with it on the next dictation
-        Widgets.Save(_host, "Whisper", "ModelPath", _speechModelPaths[i], _recognitionNote);
+        var choice = _modelChoices[i];
+        // The engine follows the model; the local model is kept as Gemini's fallback when a cloud model is chosen
+        if (choice.Cloud)
+        {
+            Widgets.Save(_host, "Cloud", "GeminiModel", choice.Value, _recognitionNote);
+            Widgets.Save(_host, "Recognition", "Engine", "Gemini", _recognitionNote);
+        }
+        else
+        {
+            // whisper-server restarts with it on the next dictation
+            Widgets.Save(_host, "Whisper", "ModelPath", choice.Value, _recognitionNote);
+            Widgets.Save(_host, "Recognition", "Engine", "Local", _recognitionNote);
+        }
     }
 
     // ---- Post-processing: grammar check ----

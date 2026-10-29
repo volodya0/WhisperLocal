@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -12,8 +11,10 @@ using WhisperLocal.Stt;
 namespace WhisperLocal.Ui.Pages;
 
 /// <summary>
-/// Every model in one place: the speech models and language models the app offers, whether each is downloaded,
-/// in use or loaded, with Download, Cancel and Use; when models are unloaded to free memory; cloud API keys.
+/// Managing models, not choosing them: the speech and language models the app offers, whether each is downloaded,
+/// which feature uses it, with Download, Cancel and Delete; the models loaded in memory now, with Unload All, and when
+/// they unload by themselves; the models folder; cloud models and their API keys. Which model a feature uses is chosen
+/// on that feature's page (Speech to Text, Notes &amp; Translate).
 /// </summary>
 internal sealed class ModelsPage : Page
 {
@@ -21,13 +22,16 @@ internal sealed class ModelsPage : Page
         [("5 minutes", 5), ("15 minutes", 15), ("30 minutes", 30), ("1 hour", 60), ("Never", 0)];
 
     private readonly IAppHost _host;
-    private readonly StackPanel _speechRows = new();
-    private readonly Ellipse _memoryDot = DarkTheme.Dot(DarkTheme.Idle);
-    private readonly TextBlock _memory = DarkTheme.Label("", 12);
-    private readonly TextBlock _memoryDetail = DarkTheme.MutedLabel("", 11);
-    private readonly Button _memoryButton;
-    private readonly StackPanel _llmRows = new();
+    private readonly StackPanel _loaded = new() { Spacing = 4 };
+    private readonly Button _unloadAll;
     private readonly ComboBox _idle = DarkTheme.Dropdown(150);
+    private readonly Note _memoryNote = new();
+    private List<int> _idleValues = [];
+    private int? _shownIdle;
+    private string? _shownLoaded;
+    private bool _updating;
+    private readonly StackPanel _speechRows = new();
+    private readonly StackPanel _llmRows = new();
     private readonly Note _note = new();
     private readonly StackPanel _cloud = new() { Spacing = 6 };
     private readonly TextBox _keyBox = new()
@@ -41,29 +45,32 @@ internal sealed class ModelsPage : Page
     private readonly Note _cloudNote = new();
     private CancellationTokenSource? _check;
     private string? _shownKey;
-    private List<int> _idleValues = [];
     private string? _shownSpeech;
     private string? _shownLlm;
-    private int? _shownIdle;
-    private bool _updating;
+    private string? _confirmDelete; // the model path whose Delete was clicked once
 
     public ModelsPage(IAppHost host) : base("Models")
     {
         _host = host;
-        _memoryButton = DarkTheme.Button("", () => _ = ToggleMemoryAsync(), small: true);
-        _memoryButton.MinWidth = 72;
 
         Add(DarkTheme.Section("Speech recognition", new StackPanel
         {
             Spacing = 4,
-            Children = { _speechRows, DarkTheme.Separator(), MemoryRow() },
+            Children = { _speechRows, _note.Line },
         }));
         if (host.HasGrammarCheck)
             Add(DarkTheme.Section("Language models", _llmRows));
+        _unloadAll = DarkTheme.Button("Unload All", () => _ = UnloadAllAsync(), small: true);
+        ToolTip.SetTip(_unloadAll, "Frees the memory now; models load again when you dictate, listen or check grammar");
+        var unload = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        unload.Children.Add(Widgets.Fields(("Unload by themselves after", _idle), ("", DarkTheme.MutedLabel("without use"))));
+        Grid.SetColumn(_unloadAll, 1);
+        _unloadAll.VerticalAlignment = VerticalAlignment.Center;
+        unload.Children.Add(_unloadAll);
         Add(DarkTheme.Section("Memory", new StackPanel
         {
-            Spacing = 4,
-            Children = { Widgets.Fields(("Unload models after", _idle), ("", DarkTheme.MutedLabel("without dictation"))), _note.Line },
+            Spacing = 6,
+            Children = { _loaded, DarkTheme.Separator(), unload, _memoryNote.Line },
         }));
         Add(DarkTheme.Section("Folder", FolderRow()));
         Add(DarkTheme.Section("Cloud", _cloud));
@@ -78,13 +85,22 @@ internal sealed class ModelsPage : Page
         };
     }
 
+    public override void OnHidden()
+    {
+        base.OnHidden();
+        if (_confirmDelete == null)
+            return;
+        _confirmDelete = null; // a Delete clicked once does not stay armed
+        _shownSpeech = _shownLlm = null;
+    }
+
     public override void Refresh()
     {
         var cfg = _host.Config.Current;
         RefreshSpeech(cfg);
-        RefreshMemory();
         if (_host.HasGrammarCheck)
             RefreshLlm(cfg);
+        RefreshLoaded();
         RefreshIdle(cfg.Memory.IdleUnloadMinutes);
         RefreshCloud(cfg.Cloud.GeminiApiKey.Trim());
     }
@@ -93,9 +109,11 @@ internal sealed class ModelsPage : Page
 
     /// <summary>
     /// One catalog model: <paramref name="Path"/> is its config value ("models/…"); <paramref name="Needed"/> when
-    /// the selected model is used now, so a missing one is an error (the grammar check may be off).
+    /// the selected model is used now, so a missing one is an error (the grammar check may be off);
+    /// <paramref name="Chooser"/> names the page where another model is chosen.
     /// </summary>
-    private sealed record ModelRow(string Title, string Size, string Hint, string Path, bool InUse, string InUseText, bool Needed, string? Url);
+    private sealed record ModelRow(string Title, string Size, string Hint, string Path, bool InUse, string InUseText, bool Needed, string? Url,
+        string Chooser);
 
     private void RefreshSpeech(AppConfig cfg)
     {
@@ -105,31 +123,41 @@ internal sealed class ModelsPage : Page
         var inUse = gemini ? "Fallback for Gemini" : "In use";
         var needed = !gemini || cfg.Recognition.FallbackToLocal;
         var rows = WhisperModels.Catalog
-            .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, WhisperModels.Find(current) == m, inUse, needed, null))
+            .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, WhisperModels.Find(current) == m, inUse, needed, null, "Speech to Text"))
             .ToList();
         if (WhisperModels.Find(current) == null)
-            rows.Add(new ModelRow($"Custom: {System.IO.Path.GetFileName(current)}", "", "Set in the config (Whisper.ModelPath).", current, true, inUse, needed, null));
-        RenderRows(_speechRows, rows, ref _shownSpeech, path => Widgets.Save(_host, "Whisper", "ModelPath", path, _note));
+            rows.Add(new ModelRow($"Custom: {System.IO.Path.GetFileName(current)}", "", "Set in the config (Whisper.ModelPath).", current, true, inUse, needed,
+                null, "Speech to Text"));
+        RenderRows(_speechRows, rows, ref _shownSpeech);
     }
 
     private void RefreshLlm(AppConfig cfg)
     {
         var current = cfg.LocalLlm.ModelPath;
-        var used = cfg.Polish.Enabled;
-        var inUse = used ? "Used by the grammar check" : "Selected for the grammar check (off)";
+        var translating = cfg.Listen.TranslateTo.Trim().Length > 0;
+        var used = cfg.Polish.Enabled || translating;
+        var inUse = (cfg.Polish.Enabled, translating) switch
+        {
+            (true, true) => "Used by the grammar check and translation",
+            (true, false) => "Used by the grammar check",
+            (false, true) => "Used for translation",
+            _ => "Selected for the grammar check and translation (both off)",
+        };
         var rows = LlmModels.Catalog
-            .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, LlmModels.Find(current) == m, inUse, used, m.Url))
+            .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, LlmModels.Find(current) == m, inUse, used, m.Url,
+                "Speech to Text or Notes & Translate"))
             .ToList();
         if (LlmModels.Find(current) == null)
-            rows.Add(new ModelRow($"Custom: {System.IO.Path.GetFileName(current)}", "", "Set in the config (LocalLlm.ModelPath).", current, true, inUse, used, null));
-        RenderRows(_llmRows, rows, ref _shownLlm, path => Widgets.Save(_host, "LocalLlm", "ModelPath", path, _note));
+            rows.Add(new ModelRow($"Custom: {System.IO.Path.GetFileName(current)}", "", "Set in the config (LocalLlm.ModelPath).", current, true, inUse, used,
+                null, "Speech to Text or Notes & Translate"));
+        RenderRows(_llmRows, rows, ref _shownLlm);
     }
 
     /// <summary>Rebuilt only when a row's state changes, so a button under the mouse keeps its click.</summary>
-    private void RenderRows(StackPanel panel, List<ModelRow> rows, ref string? shown, Action<string> use)
+    private void RenderRows(StackPanel panel, List<ModelRow> rows, ref string? shown)
     {
         var states = rows.Select(r => (Row: r, Downloaded: File.Exists(AppPaths.Resolve(r.Path)), Progress: _host.DownloadProgress(r.Path))).ToList();
-        var signature = string.Join("\n", states.Select(s => $"{s.Row}|{s.Downloaded}|{s.Progress}"));
+        var signature = string.Join("\n", states.Select(s => $"{s.Row}|{s.Downloaded}|{s.Progress}|{s.Row.Path == _confirmDelete}"));
         if (signature == shown)
             return;
         shown = signature;
@@ -142,11 +170,11 @@ internal sealed class ModelsPage : Page
             if (i > 0)
                 panel.Children.Add(DarkTheme.Separator());
             var (row, downloaded, progress) = states[i];
-            panel.Children.Add(Row(row, downloaded, progress, downloading, use));
+            panel.Children.Add(Row(row, downloaded, progress, downloading));
         }
     }
 
-    private Control Row(ModelRow row, bool downloaded, string? progress, bool downloading, Action<string> use)
+    private Control Row(ModelRow row, bool downloaded, string? progress, bool downloading)
     {
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("18,*,Auto"), MinHeight = 30 };
         grid.Children.Add(DarkTheme.Dot(
@@ -189,8 +217,19 @@ internal sealed class ModelsPage : Page
             }, accent: row.InUse && row.Needed, small: true);
             button.IsEnabled = !downloading;
         }
-        else if (downloaded && !row.InUse)
-            button = DarkTheme.Button("Use", () => use(path), small: true);
+        else if (downloaded && row.InUse)
+        {
+            // The model in use stays: choosing another one first is a decision for that feature's page
+            button = DarkTheme.Button("Delete", () => { }, small: true);
+            button.IsEnabled = false;
+            ToolTip.SetTip(button, $"In use: choose another model in {row.Chooser} first");
+        }
+        else if (downloaded)
+        {
+            var confirming = _confirmDelete == path;
+            button = DarkTheme.Button(confirming ? "Delete for good?" : "Delete", () => Delete(path), small: true);
+            ToolTip.SetTip(button, $"Removes {System.IO.Path.GetFileName(AppPaths.Resolve(path))} from the models folder; Download gets it back");
+        }
         if (button != null)
         {
             button.Margin = new Thickness(12, 0, 0, 0);
@@ -198,6 +237,33 @@ internal sealed class ModelsPage : Page
             grid.Children.Add(button);
         }
         return grid;
+    }
+
+    /// <summary>The first click asks (the button says "Delete for good?"), the second deletes the file.</summary>
+    private void Delete(string path)
+    {
+        if (_confirmDelete != path)
+        {
+            _confirmDelete = path;
+            _shownSpeech = _shownLlm = null;
+            Refresh();
+            return;
+        }
+        _confirmDelete = null;
+        var file = AppPaths.Resolve(path);
+        try
+        {
+            File.Delete(file);
+            Log.Info($"Model deleted: {file}");
+            _note.Set($"Deleted {System.IO.Path.GetFileName(file)}.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error($"Deleting {file} failed", ex);
+            _note.Set($"Could not delete it: {ex.Message}", DarkTheme.Error);
+        }
+        _shownSpeech = _shownLlm = null;
+        Refresh();
     }
 
     /// <summary>Where downloaded models are kept, with a button that opens it.</summary>
@@ -289,7 +355,7 @@ internal sealed class ModelsPage : Page
         _cloudNote.Line.Margin = new Thickness(18, 0, 0, 0);
         _cloud.Children.Add(_cloudNote.Line);
         var later = DarkTheme.MutedLabel(
-            "Choose Gemini for recognition in Speech to Text → Recognition → Engine.", 11);
+            "With a key, the Gemini models appear in Speech to Text → Recognition → Model.", 11);
         later.Margin = new Thickness(18, 2, 0, 0);
         _cloud.Children.Add(later);
     }
@@ -338,57 +404,53 @@ internal sealed class ModelsPage : Page
 
     // ---- Memory ----
 
-    private Control MemoryRow()
+    /// <summary>One row per loaded model (name, what uses it, its memory); rebuilt only when that changes.</summary>
+    private void RefreshLoaded()
     {
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("18,*,Auto") };
-        grid.Children.Add(_memoryDot);
-        var texts = new StackPanel
+        var loaded = _host.GetLoadedModels();
+        var signature = string.Join("\n", loaded.Select(l => $"{l.Name}|{l.Detail}"));
+        _unloadAll.IsEnabled = loaded.Count > 0;
+        if (signature == _shownLoaded)
+            return;
+        _shownLoaded = signature;
+        _loaded.Children.Clear();
+        if (loaded.Count == 0)
         {
-            Spacing = 1,
-            Margin = new Thickness(0, 0, 10, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-            Children = { _memory, _memoryDetail },
-        };
-        Grid.SetColumn(texts, 1);
-        grid.Children.Add(texts);
-        Grid.SetColumn(_memoryButton, 2);
-        grid.Children.Add(_memoryButton);
-        return grid;
+            _loaded.Children.Add(DarkTheme.MutedLabel("Nothing is loaded. Models load when you dictate, listen or check grammar."));
+            return;
+        }
+        foreach (var (name, detail) in loaded)
+        {
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("18,*"), MinHeight = 30 };
+            row.Children.Add(DarkTheme.Dot(DarkTheme.Ok));
+            var texts = new StackPanel
+            {
+                Spacing = 1,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children = { DarkTheme.Label(name, 13), DarkTheme.MutedLabel(detail, 11) },
+            };
+            Grid.SetColumn(texts, 1);
+            row.Children.Add(texts);
+            _loaded.Children.Add(row);
+        }
     }
 
-    private void RefreshMemory()
+    private async Task UnloadAllAsync()
     {
-        var (loaded, detail) = _host.GetModelMemory();
-        _memoryDot.Fill = loaded ? DarkTheme.Ok : DarkTheme.Idle;
-        _memory.Text = loaded ? "Loaded in memory" : "Not loaded";
-        _memoryDetail.Text = !loaded && RecognitionRouter.UsesGemini(_host.Config.Current)
-            ? "Gemini recognises in the cloud; the local model loads only when it is needed as the fallback"
-            : detail;
-        _memoryButton.Content = loaded ? "Unload" : "Load";
-    }
-
-    private async Task ToggleMemoryAsync()
-    {
-        _memoryButton.IsEnabled = false;
+        _unloadAll.IsEnabled = false;
         try
         {
-            if (_host.GetModelMemory().Loaded)
-                await _host.UnloadAsync();
-            else
-            {
-                _memoryDot.Fill = DarkTheme.Accent;
-                _memory.Text = "Loading…";
-                await _host.LoadAsync();
-            }
+            await _host.UnloadAsync();
         }
         catch (Exception ex)
         {
-            Log.Error("Load/unload failed", ex);
+            Log.Error("Unloading failed", ex);
+            _memoryNote.Set($"Could not unload: {ex.Message}", DarkTheme.Error);
         }
         finally
         {
-            _memoryButton.IsEnabled = true;
-            RefreshMemory();
+            _shownLoaded = null;
+            RefreshLoaded();
         }
     }
 
@@ -418,6 +480,6 @@ internal sealed class ModelsPage : Page
         var i = _idle.SelectedIndex;
         if (_updating || i < 0 || i >= _idleValues.Count)
             return;
-        Widgets.Save(_host, "Memory", "IdleUnloadMinutes", _idleValues[i], _note);
+        Widgets.Save(_host, "Memory", "IdleUnloadMinutes", _idleValues[i], _memoryNote);
     }
 }

@@ -73,19 +73,22 @@ attention) at the bottom.
   - **Language** — Ukrainian + English (detected for each dictation) is the default. Other choices: add Russian,
     Ukrainian only, English only, or any language. With a single language, speech in another language comes out
     translated into it.
-  - **Engine** — *On this computer (Whisper)*, the default, or *Google Gemini (cloud)* with your API key from the
-    Models page: often more accurate with mixed Ukrainian and English, but the recording is sent to Google. Choose the
-    Gemini model (Flash, or the faster Flash-Lite), and whether a failed request (no internet, limit used up) is
-    recognised on this computer instead.
-  - **Local model** — *Large v3* is the most accurate; *Large v3 Turbo* is several times faster and almost as accurate, the
-    better choice for computers with 8–16 GB of memory (the default on Windows).
+  - **Model** — one list of the models ready to use: the ones downloaded on the Models page (*Large v3* is the most
+    accurate; *Large v3 Turbo* is several times faster and almost as accurate, the better choice for computers with
+    8–16 GB of memory, and the default on Windows) and, once a Gemini key is added there, *Gemini Flash* and the faster
+    *Gemini Flash-Lite*: often more accurate with mixed Ukrainian and English, but the recording is sent to Google.
+    With Gemini you can choose whether a failed request (no internet, limit used up) is recognised on this computer,
+    with the last local model you chose. Listening uses that same local model.
   - **Post-processing** — the grammar check (see below) and the correction rules for words Whisper mishears.
-- **Notes & Translate** — which folder holds the notes, and whether new ones are Markdown or plain text.
-- **Models** — every speech and language model: downloaded or not, which one is in use, **Download** and **Use**;
-  whether the speech model is loaded (**Unload** frees the memory right away) and after how long without dictation
-  models unload by themselves (5 minutes by default); the folder the models are downloaded to; and **Cloud**, where
-  you can paste a Google Gemini API key (free from Google AI Studio, **Get a Key**) and **Test** it; then choose Gemini as
-  the engine in Speech to Text.
+- **Notes & Translate** — which folder holds the notes, and whether new ones are Markdown or plain text; on macOS,
+  **Listening** (see below): its shortcut, the language heard, the translation language and the translation model.
+- **Models** — managing models, not choosing them (that happens on the page of the feature that uses one): every
+  speech and language model, downloaded or not and which feature uses it, with **Download** and **Delete** (the model
+  in use cannot be deleted); **Memory**, the models loaded right now and how much memory each uses, with **Unload All**
+  and after how long without use they unload by themselves (5 minutes by default); the folder the models are
+  downloaded to; and **Cloud**, where
+  you can paste a Google Gemini API key (free from Google AI Studio, **Get a Key**) and **Test** it; the Gemini models
+  then appear in Speech to Text → Model.
 
 Everything else (start at login, which microphone, English terms that get misheard…) is in the config file: see
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Changes apply as soon as you save it.
@@ -96,12 +99,30 @@ Turn it on in Speech to Text → Post-processing and download its model on the M
 small panel proposes a corrected version with the changed words in green. Its buttons replace what was pasted with
 the corrected text or copy it; or just ignore it — it goes away by itself. It runs locally too.
 
+## Notes from what the Mac plays (macOS 14.2 or later)
+
+For a call, a lecture or a video: press **Left Control + Left Option + L** and WhisperLocal starts writing down
+everything the Mac plays. The first time, macOS asks to allow **System Audio
+Recording**; if it was refused, allow WhisperLocal in System Settings → Privacy & Security → Screen & System Audio
+Recording.
+
+A panel above the indicator shows the last sentences, and the one still being spoken greyed at the bottom. Its menu
+translates them: **Original**, or a language such as Українська or English; the translation then stands next to each
+sentence. When translated, every line is written in both languages. The translation uses the local language model,
+so download one on the **Models** page first. The language you pick is remembered.
+
+The panel stays until you click its **stop** button (pressing the shortcut again only brings it back); the folder
+button opens the note. Each session is a note with times in your notes folder, so it is on the **Notes** page. The
+shortcut, the language that is heard and the translation language are on the **Notes & Translate** page. Your own
+microphone is not recorded, and listening always recognises on this Mac, even when dictation uses Gemini.
+
 ## Menu
 
 The menu bar icon on macOS, the tray icon on Windows:
 
 - **Open WhisperLocal…** — the main window.
 - **Show Last Transcript** — the text of the last dictation.
+- **Listen to System Audio** / **Stop Listening** (macOS) — the same as the listening shortcut and the stop button.
 - **Check for Updates…** — looks for a new version and, if you agree, installs it and restarts. Your settings,
   models and history stay.
 - **Enabled** — pause or resume dictation.
@@ -127,7 +148,8 @@ The menu bar icon on macOS, the tray icon on Windows:
 Unless you choose Gemini, audio and text never leave your computer. The only network access is downloading models
 from HuggingFace and, when you ask for it, checking GitHub for updates and checking a Gemini API key with Google.
 With Gemini as the recognition engine, each recording is sent to Google's Gemini API; on the free tier Google may use
-it to improve its products (see Google's terms). Recordings are not saved. The log and the dictation history keep
+it to improve its products (see Google's terms). Recordings are not saved (listening keeps only the text, in its note). Listening always
+recognises locally, even with Gemini. The log and the dictation history keep
 the text of your dictations to help with troubleshooting; set `Logging.LogText` to `false` in the config to stop
 that.
 

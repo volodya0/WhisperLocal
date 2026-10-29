@@ -157,6 +157,20 @@
     "Temperature": 0.2,
     "TimeoutMs": 15000
   },
+  // Listening (macOS 14.2+): the shortcut starts transcribing what the Mac plays into a note in Notes.Folder; stop it
+  // with the indicator's stop button. The indicator's menu picks a translation language (uses the LocalLlm model)
+  "Listen": {
+    "Hotkey": "LeftControl+LeftOption+L",
+    // Language of what is heard: "auto" detects it, or a code like "en"
+    "Language": "auto",
+    // Translate into this language ("uk", "en", …); "" keeps the original only
+    "TranslateTo": "",
+    "Languages": [ "uk", "en", "de", "pl", "es", "fr" ],
+    "PauseMs": 600,
+    "MaxSegmentSec": 20,
+    // While a sentence is being spoken, show its text so far (greyed) about this often, in ms; 0 = off
+    "ProvisionalMs": 1000
+  },
   "Insert": {
     "AppendTrailingSpace": true,
     "RestoreClipboard": true,

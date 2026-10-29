@@ -87,8 +87,24 @@ CPU; `-ng` runs on the CPU only.
 | `Polish.Enabled` | Propose a corrected version after each dictation (the checkbox in Speech to Text → Post-processing). |
 | `Polish.MinWords` | Shorter dictations are not checked. |
 | `Polish.DisplaySeconds` | How long the proposal stays (longer while the mouse is over it). |
-| `LocalLlm.ModelPath` | The GGUF model (chosen in Speech to Text, downloaded on the Models page; any instruction-tuned GGUF works). |
+| `LocalLlm.ModelPath` | The GGUF model, for the grammar check and translation (chosen in Speech to Text or Notes & Translate, downloaded on the Models page; any instruction-tuned GGUF works). |
 | `LocalLlm.ServerExe`, `Port`, `ExtraArgs` | The bundled `llama-server` and how it runs. |
+
+## Listening: notes from system audio (macOS 14.2+)
+
+| Setting | Meaning |
+|---|---|
+| `Listen.Hotkey` | Starts listening (key names as for `Hotkey.Key`); `""` turns the shortcut off. Default `LeftControl+LeftOption+L`. |
+| `Listen.Language` | Language of what is heard: `"auto"` detects it per segment, a code (`"en"`) fixes it. |
+| `Listen.TranslateTo` | Translate into this language (`"uk"`, `"en"`, …), `""` for the original only. Set from the indicator's menu. |
+| `Listen.Languages` | The languages the indicator's menu offers. |
+| `Listen.PauseMs`, `Listen.MaxSegmentSec` | A pause this long ends a segment; without a pause it is cut after this many seconds. |
+| `Listen.ProvisionalMs` | While a sentence is being spoken, its text so far is shown greyed about this often (ms); `0` turns it off. |
+| `Listen.TranslateTimeoutMs`, `Listen.Temperature`, `Listen.TranslatePrompt` | How the language model translates (`{language}` in the prompt is the language name). |
+
+Each session is a note in the notes folder (`Notes.Folder`, `Notes.Extension`), so the Notes page lists it.
+Translation uses the `LocalLlm` model (the one the grammar check uses). Listening always recognises with local
+Whisper, whatever `Recognition.Engine` says. The shortcut and the languages are on the Notes & Translate page.
 
 ## LLM cleanup through Ollama (optional)
 
