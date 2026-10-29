@@ -59,6 +59,7 @@ internal sealed class ListenPanel : IDisposable
     private bool _finishing;
     private string? _problem;
     private string? _provisional;
+    private string? _provisionalTranslation;
     private bool _placed;
 
     /// <param name="chooseLanguage">Gets the chosen code ("" for the original); false keeps the previous choice.</param>
@@ -128,6 +129,7 @@ internal sealed class ListenPanel : IDisposable
         _finishing = false;
         _problem = null;
         _provisional = null;
+        _provisionalTranslation = null;
         _since = Stopwatch.GetTimestamp();
         _languages = languages.ToList();
         if (language.Length > 0 && !_languages.Contains(language))
@@ -189,6 +191,15 @@ internal sealed class ListenPanel : IDisposable
         Render(fadeIn: null);
     }
 
+    /// <summary>The translation of the sentence being spoken, greyed next to it; null removes it.</summary>
+    public void ShowProvisionalTranslation(string? text)
+    {
+        if (text == _provisionalTranslation)
+            return;
+        _provisionalTranslation = text;
+        Render(fadeIn: null);
+    }
+
     /// <summary>A short error after the time until the next line comes.</summary>
     public void ShowProblem(string message)
     {
@@ -220,6 +231,7 @@ internal sealed class ListenPanel : IDisposable
         if (code != _language && _chooseLanguage(code))
         {
             _language = code;
+            _provisionalTranslation = null; // in the language before
             Render(fadeIn: null); // one column or two
         }
         SelectLanguage();
@@ -309,7 +321,13 @@ internal sealed class ListenPanel : IDisposable
         {
             var row = RowAt(placed.Count);
             SetText(row.Original, _provisional, MutedColor);
-            placed.Add((row, Measure(row.Original, column), false));
+            var height = Measure(row.Original, column);
+            if (twoColumns)
+            {
+                SetText(row.Translation, _provisionalTranslation ?? "", MutedColor);
+                height = Math.Max(height, Measure(row.Translation, column));
+            }
+            placed.Add((row, height, twoColumns));
         }
 
         var content = placed.Sum(p => p.Height) + RowGap * Math.Max(0, placed.Count - 1);

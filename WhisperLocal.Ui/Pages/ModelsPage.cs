@@ -63,12 +63,14 @@ internal sealed class ModelsPage : Page
             Children = { _loaded, DarkTheme.Separator(), unload, _memoryNote.Line },
         }));
         Add(DarkTheme.Section("Folder", FolderRow()));
-        _gemini = new CloudCard(host, "Google Gemini", "Speech · Text", "GeminiApiKey", "AIza…", "Google", "Google AI Studio",
-            "AI Studio shows it after Create API key.", GeminiClient.KeyPage,
-            "With a key, the Gemini models appear in Speech to Text → Recognition → Model.", GeminiClient.CheckKeyAsync);
-        _groq = new CloudCard(host, "Groq", "Speech", "GroqApiKey", "gsk_…", "Groq", "the Groq console",
-            "the Groq console shows it after Create API Key.", GroqClient.KeyPage,
-            "With a key, Whisper on Groq appears in Speech to Text → Recognition → Model.", GroqClient.CheckKeyAsync);
+        _gemini = new CloudCard(host, "Gemini", "Google Gemini", "Speech · Text", "GeminiApiKey", "AIza…", "Google", "Google AI Studio",
+            "AI Studio shows it after Create API key.", GeminiClient.KeyPage, GeminiClient.UsagePage,
+            "With a key, the Gemini models appear in Speech to Text → Model" +
+            (OperatingSystem.IsMacOS() ? " and Notes & Translate → Translation model." : "."), GeminiClient.CheckKeyAsync);
+        _groq = new CloudCard(host, "Groq", "Groq", "Speech · Text", "GroqApiKey", "gsk_…", "Groq", "the Groq console",
+            "the Groq console shows it after Create API Key.", GroqClient.KeyPage, GroqClient.UsagePage,
+            "With a key, Whisper on Groq appears in Speech to Text → Model" +
+            (OperatingSystem.IsMacOS() ? ", and Llama in Notes & Translate → Translation model." : "."), GroqClient.CheckKeyAsync);
         Add(DarkTheme.Section("Cloud", new StackPanel
         {
             Spacing = 6,
@@ -128,7 +130,8 @@ internal sealed class ModelsPage : Page
     private void RefreshLlm(AppConfig cfg)
     {
         var current = cfg.LocalLlm.ModelPath;
-        var translating = cfg.Listen.TranslateTo.Trim().Length > 0;
+        // Translation with Gemini or Groq does not use the local model
+        var translating = cfg.Listen.TranslateTo.Trim().Length > 0 && Translator.CloudName(cfg) == null;
         var used = cfg.Polish.Enabled || translating;
         var inUse = (cfg.Polish.Enabled, translating) switch
         {
@@ -300,21 +303,25 @@ internal sealed class ModelsPage : Page
     private sealed class CloudCard
     {
         private readonly IAppHost _host;
-        private readonly string _title, _uses, _keyProperty, _vendor, _console, _pasteHint, _keyPage, _later;
+        private readonly string _provider, _title, _uses, _keyProperty, _vendor, _console, _pasteHint, _keyPage, _usagePage, _later;
         private readonly Func<string, CancellationToken, Task<string?>> _checkKey;
         private readonly TextBox _keyBox;
         private readonly Note _note = new();
+        private readonly TextBlock _usage = DarkTheme.MutedLabel("", 11);
         private CancellationTokenSource? _check;
         private string? _shownKey;
 
         public StackPanel Panel { get; } = new() { Spacing = 6 };
 
-        public CloudCard(IAppHost host, string title, string uses, string keyProperty, string keyExample, string vendor, string console,
-            string pasteHint, string keyPage, string later, Func<string, CancellationToken, Task<string?>> checkKey)
+        public CloudCard(IAppHost host, string provider, string title, string uses, string keyProperty, string keyExample, string vendor, string console,
+            string pasteHint, string keyPage, string usagePage, string later, Func<string, CancellationToken, Task<string?>> checkKey)
         {
             _host = host;
-            (_title, _uses, _keyProperty, _vendor, _console, _pasteHint, _keyPage, _later, _checkKey) =
-                (title, uses, keyProperty, vendor, console, pasteHint, keyPage, later, checkKey);
+            _provider = provider;
+            _usage.TextWrapping = TextWrapping.Wrap;
+            _usage.Margin = new Thickness(18, 0, 0, 0);
+            (_title, _uses, _keyProperty, _vendor, _console, _pasteHint, _keyPage, _usagePage, _later, _checkKey) =
+                (title, uses, keyProperty, vendor, console, pasteHint, keyPage, usagePage, later, checkKey);
             _keyBox = new TextBox
             {
                 PasswordChar = '•',
@@ -334,6 +341,7 @@ internal sealed class ModelsPage : Page
 
         public void Refresh(string key)
         {
+            RefreshUsage(key.Length > 0);
             if (key == _shownKey)
                 return;
             _shownKey = key;
@@ -363,6 +371,7 @@ internal sealed class ModelsPage : Page
                     Spacing = 8,
                     Children =
                     {
+                        UsageButton(),
                         DarkTheme.Button("Test", () => _ = CheckKeyAsync(key), small: true),
                         DarkTheme.Button("Remove", RemoveKey, small: true),
                     },
@@ -376,6 +385,7 @@ internal sealed class ModelsPage : Page
             Grid.SetColumn(buttons, 2);
             row.Children.Add(buttons);
             Panel.Children.Add(row);
+            Panel.Children.Add(_usage);
 
             if (!connected)
             {
@@ -389,6 +399,30 @@ internal sealed class ModelsPage : Page
             var later = DarkTheme.MutedLabel(_later, 11);
             later.Margin = new Thickness(18, 2, 0, 0);
             Panel.Children.Add(later);
+        }
+
+        /// <summary>
+        /// What this app sent today, the last minute, Groq's limits left and a recent limit hit (in the warning color
+        /// while the provider is near its limit); hidden before the first request.
+        /// </summary>
+        private void RefreshUsage(bool connected)
+        {
+            var problem = false;
+            var text = connected ? CloudUsage.Describe(_provider, out problem) : null;
+            _usage.IsVisible = text != null;
+            if (text == null)
+                return;
+            _usage.Text = text;
+            _usage.Foreground = problem ? DarkTheme.Warning : DarkTheme.Muted;
+            ToolTip.SetTip(_usage, "Counted by this app on this computer (other uses of the key are not included); Usage shows the full picture");
+        }
+
+        /// <summary>Opens the provider's page with the requests and limits used, so a used-up limit is easy to see.</summary>
+        private Button UsageButton()
+        {
+            var button = DarkTheme.Button("Usage", () => _host.OpenPath(_usagePage), small: true);
+            ToolTip.SetTip(button, $"Opens {_console}: requests, tokens and limits used");
+            return button;
         }
 
         private void SaveKey()

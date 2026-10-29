@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using WhisperLocal.Audio;
+using WhisperLocal.Cloud;
 using WhisperLocal.Config;
 using WhisperLocal.Llm;
 using WhisperLocal.Stt;
@@ -21,16 +22,18 @@ public sealed class ListenLine(TimeSpan at, string text)
 
 /// <summary>
 /// Listening: cuts a continuous audio stream into segments at pauses (or every Listen.MaxSegmentSec), transcribes
-/// them one after another and, when <see cref="TranslateTo"/> is set, translates each with the local LLM. Recognition
-/// and translation run as two stages, so a slow translation never holds up the next segment's text. While a segment
-/// is still being spoken, it is transcribed about every Listen.ProvisionalMs as provisional text, whenever no finished
-/// segment is waiting for recognition.
+/// them one after another and, when <see cref="TranslateTo"/> is set, translates each with the language model.
+/// Recognition and translation run as two stages, so a slow translation never holds up the next segment's text, and
+/// up to two lines are translated at once (finished in order). While a segment is still being spoken, it is
+/// transcribed about every Listen.ProvisionalMs as provisional text, whenever no finished segment is waiting for
+/// recognition, and that text is translated at most every Listen.TranslateWhileSpeakingMs.
 /// </summary>
 public sealed class LiveListener
 {
     private const int TickMs = 200;
     private const int MinSegmentMs = 1000;
     private const int PromptChars = 200;
+    private const int ParallelTranslations = 2;
 
     private readonly ConfigManager _config;
     private readonly ISpeechToText _stt;
@@ -46,6 +49,10 @@ public sealed class LiveListener
     private int _provisionalShown = -1; // generation of the provisional text on screen, -1 for none
     private long _provisionalAt;
     private double _provisionalUpToMs;
+    private bool _provisionalTranslateBusy;
+    private long _provisionalTranslatedAt;
+    private (string Text, int Generation)? _provisionalToTranslate; // the newest text, waiting for the one in flight
+    private bool _strainShown; // "limit reached" was reported for the current strain
 
     public LiveListener(ConfigManager config, ISpeechToText stt, Translator translator)
     {
@@ -73,6 +80,9 @@ public sealed class LiveListener
     /// <summary>The segment being spoken, transcribed so far; null when it is gone (recognized, or nothing).</summary>
     public event Action<string?>? Provisional;
 
+    /// <summary>The translation of the provisional text; null when it is gone (with the provisional text).</summary>
+    public event Action<string?>? ProvisionalTranslation;
+
     /// <summary>
     /// Runs until <paramref name="ct"/> is cancelled, then finishes the segments already heard before returning.
     /// The events are raised on the caller's context.
@@ -85,6 +95,7 @@ public sealed class LiveListener
         _pendingSegments = 0;
         _provisionalShown = -1;
         _provisionalUpToMs = 0;
+        _provisionalToTranslate = null;
         var segments = Channel.CreateUnbounded<(byte[] Pcm, TimeSpan At, int Generation)>();
         var lines = Channel.CreateUnbounded<ListenLine>();
         var recognize = RecognizeAsync(segments.Reader, lines.Writer);
@@ -186,6 +197,7 @@ public sealed class LiveListener
                 return;
             _provisionalShown = generation;
             Provisional?.Invoke(text);
+            TranslateProvisional(text, generation);
         }
         catch (Exception ex)
         {
@@ -205,7 +217,68 @@ public sealed class LiveListener
         if (_provisionalShown < 0 || _provisionalShown > generation)
             return;
         _provisionalShown = -1;
+        _provisionalToTranslate = null;
         Provisional?.Invoke(null);
+        ProvisionalTranslation?.Invoke(null);
+    }
+
+    /// <summary>
+    /// Translates the provisional text when Listen.TranslateWhileSpeakingMs has passed since the last request and none
+    /// is in flight; otherwise keeps it as the next one to translate. A result is shown only while its segment is still
+    /// the one being spoken.
+    /// </summary>
+    private void TranslateProvisional(string text, int generation)
+    {
+        var target = TranslateTo;
+        var intervalMs = _config.Current.Listen.TranslateWhileSpeakingMs;
+        if (target.Length == 0 || intervalMs <= 0)
+            return;
+        // Near the provider's limit: finished lines go first, the preview waits until it has room again
+        if (Translator.CloudName(_config.Current) is { } cloud && CloudUsage.IsStrained(cloud))
+        {
+            if (!_strainShown)
+                Failed?.Invoke($"{cloud} limit nearly reached: live translation paused");
+            _strainShown = true;
+            return;
+        }
+        _strainShown = false;
+        if (_provisionalTranslateBusy || Stopwatch.GetElapsedTime(_provisionalTranslatedAt).TotalMilliseconds < intervalMs)
+        {
+            _provisionalToTranslate = (text, generation);
+            return;
+        }
+        _ = TranslateProvisionalAsync(text, generation, target);
+    }
+
+    private async Task TranslateProvisionalAsync(string text, int generation, string target)
+    {
+        _provisionalTranslateBusy = true;
+        _provisionalTranslatedAt = Stopwatch.GetTimestamp();
+        _provisionalToTranslate = null;
+        try
+        {
+            var translation = await _translator.TranslateAsync(text, target, Prompt(), CancellationToken.None);
+            if (generation == _generation && _provisionalShown == generation && translation != null)
+                ProvisionalTranslation?.Invoke(translation);
+        }
+        catch (Exception ex)
+        {
+            // The finished line reports failures; this one is only a preview
+            Log.Debug($"Listening: provisional translation failed: {ex.Message}");
+        }
+        finally
+        {
+            _provisionalTranslateBusy = false;
+        }
+        // The text moved on while this one was translated: the newest text, once the interval allows
+        if (_provisionalToTranslate is { } next && next.Generation == _generation)
+        {
+            var wait = _config.Current.Listen.TranslateWhileSpeakingMs - Stopwatch.GetElapsedTime(_provisionalTranslatedAt).TotalMilliseconds;
+            if (wait > 0)
+                await Task.Delay(TimeSpan.FromMilliseconds(wait));
+            if (_provisionalToTranslate is { } newest && newest.Generation == _generation && !_provisionalTranslateBusy)
+                TranslateProvisional(newest.Text, newest.Generation);
+        }
     }
 
     // The text before this segment helps Whisper continue a sentence cut in the middle
@@ -250,32 +323,70 @@ public sealed class LiveListener
         }
     }
 
+    /// <summary>
+    /// Translates the recognized lines, up to <see cref="ParallelTranslations"/> at once, and finishes them in order: a
+    /// slow answer does not hold up the requests for the lines after it, only their showing.
+    /// </summary>
     private async Task TranslateAsync(ChannelReader<ListenLine> lines)
     {
+        var started = Channel.CreateUnbounded<(ListenLine Line, Task<string?>? Translation)>();
+        var finish = FinishAsync(started.Reader);
+        using var slots = new SemaphoreSlim(ParallelTranslations);
         var context = new Queue<string>();
-        await foreach (var line in lines.ReadAllAsync())
+        try
         {
-            var target = TranslateTo;
-            if (target.Length > 0)
+            await foreach (var line in lines.ReadAllAsync())
             {
-                try
+                var target = TranslateTo;
+                Task<string?>? translation = null;
+                if (target.Length > 0)
                 {
-                    var translation = await _translator.TranslateAsync(line.Text, target, string.Join(" ", context), CancellationToken.None);
-                    // Already in that language: nothing to add
-                    if (translation != null && !string.Equals(translation.TrimEnd('.'), line.Text.TrimEnd('.'), StringComparison.OrdinalIgnoreCase))
-                        line.Translation = translation;
+                    await slots.WaitAsync();
+                    translation = TranslateLineAsync(line, target, string.Join(" ", context), slots);
                 }
-                catch (Exception ex)
-                {
-                    var message = ex is OperationCanceledException ? "timed out" : ex.Message;
-                    Log.Warn($"Listening: translation failed: {message}");
-                    Failed?.Invoke($"translation {message}");
-                }
+                started.Writer.TryWrite((line, translation));
+                context.Enqueue(line.Text);
+                if (context.Count > 2)
+                    context.Dequeue();
             }
+        }
+        finally
+        {
+            started.Writer.TryComplete();
+            await finish;
+        }
+    }
 
-            context.Enqueue(line.Text);
-            if (context.Count > 2)
-                context.Dequeue();
+    /// <summary>The translation of one line, or null (none needed, or it failed: reported, the line stays as heard).</summary>
+    private async Task<string?> TranslateLineAsync(ListenLine line, string target, string context, SemaphoreSlim slots)
+    {
+        try
+        {
+            var translation = await _translator.TranslateAsync(line.Text, target, context, CancellationToken.None);
+            // Already in that language: nothing to add
+            return translation != null && !string.Equals(translation.TrimEnd('.'), line.Text.TrimEnd('.'), StringComparison.OrdinalIgnoreCase)
+                ? translation
+                : null;
+        }
+        catch (Exception ex)
+        {
+            var message = ex is OperationCanceledException ? "timed out" : ex.Message;
+            Log.Warn($"Listening: translation failed: {message}");
+            Failed?.Invoke($"translation {message}");
+            return null;
+        }
+        finally
+        {
+            slots.Release();
+        }
+    }
+
+    private async Task FinishAsync(ChannelReader<(ListenLine Line, Task<string?>? Translation)> started)
+    {
+        await foreach (var (line, translation) in started.ReadAllAsync())
+        {
+            if (translation != null)
+                line.Translation = await translation;
             line.Done = true;
             Finished?.Invoke(line);
         }

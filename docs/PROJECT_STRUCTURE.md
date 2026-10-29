@@ -68,18 +68,19 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Llm/LlamaServer.cs` | Runs bundled `llama-server` as a child process on demand and talks to its HTTP API; load/unload, memory use. |
 | `Llm/LlmModels.cs` | Catalog of GGUF models offered in the main window (Gemma 3 4B/12B, Qwen 3 4B) with download links. |
 | `Llm/Polisher.cs` | Grammar check: asks the language model for a corrected version of a finished dictation. |
-| `Llm/Translator.cs` | Listening: translates one transcript segment with the language model; language names. |
+| `Llm/Translator.cs` | Listening: translates one transcript segment with the local language model, Gemini or Groq; language names. |
 | `Llm/Autocompleter.cs` | Autocomplete (shelved): continues the live transcript as plain text. |
 | `Native/ChildProcessJob.cs` | Makes sure `whisper-server`/`llama-server` never outlive the app (Windows job object; pid file + cleanup elsewhere). |
 | `Native/JobObjectMethods.cs` | P/Invoke declarations for the Windows job object API. |
 | `Pipeline/DictationPipeline.cs` | Audio → speech-to-text → filters → optional LLM cleanup; returns the text and timings. |
 | `Pipeline/DictationHistory.cs` | Last 1000 dictations with timings, in `history.jsonl`. |
 | `Pipeline/DictationStats.cs` | Lifetime statistics (today / 7 / 30 days / all time) in `stats.json`. |
-| `Cloud/GeminiClient.cs` | Google Gemini API with the user's key: checks that a key works; transcribes a recording (generateContent with the audio inline). |
-| `Cloud/GroqClient.cs` | Groq API (OpenAI-compatible) with the user's key: checks that a key works; transcribes a recording with Whisper on Groq, following `Whisper.Language` like local recognition. |
+| `Cloud/GeminiClient.cs` | Google Gemini API with the user's key: checks that a key works; transcribes a recording (generateContent with the audio inline); text requests (translation). |
+| `Cloud/CloudUsage.cs` | What the app sent to Gemini and Groq today (kept in `cloud-usage.json`), Groq's limits from its response headers, refusals for the limit; whether a provider is near its limit (live translation pauses then). |
+| `Cloud/GroqClient.cs` | Groq API (OpenAI-compatible) with the user's key: checks that a key works; transcribes a recording with Whisper on Groq, following `Whisper.Language` like local recognition; text requests (translation, chat completions in JSON mode). |
 | `Notes/NoteFiles.cs` | The notes folder: lists `.md`/`.txt` files newest first with their first line, creates new notes. |
 | `Pipeline/LiveAutocomplete.cs` | Autocomplete loop while the hotkey is held (shelved). |
-| `Pipeline/LiveListener.cs` | Listening: cuts the system audio stream into segments at pauses, transcribes and optionally translates them. |
+| `Pipeline/LiveListener.cs` | Listening: cuts the system audio stream into segments at pauses, transcribes and optionally translates them (two lines at once, finished in order); the sentence being spoken is shown and, if wanted, translated as it goes. |
 | `Pipeline/ListenNotes.cs` | Listening: the Markdown notes file of a session, written line by line. |
 | `Stt/ISpeechToText.cs` | Speech-to-text interface: warm up, transcribe, unload. |
 | `Stt/WhisperServerStt.cs` | Runs bundled `whisper-server` (Vulkan on Windows, Metal on macOS) on demand and transcribes over HTTP; language detection with an allowed list. |
@@ -106,8 +107,8 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Pages/HistoryPage.cs` | Statistics (today, 7 days, 30 days, all time) and all kept dictations grouped by day, with averages. |
 | `Pages/NotesPage.cs` | The notes folder as a list, newest first; New Note, Open Folder. |
 | `Pages/SpeechPage.cs` | Hotkey; engine (local, Gemini or Groq, its model, fallback), language and local speech model; post-processing: grammar check and its model, the corrections dictionary. |
-| `Pages/NotesSettingsPage.cs` | Notes folder and file type; listening (macOS: shortcut, language heard, translation language); translation (to come). |
-| `Pages/ModelsPage.cs` | Managing models (choosing happens on the feature pages): every speech and language model with its state (which feature uses it, downloaded, downloading) and Download/Cancel/Delete; memory and idle unload; the models folder; the Gemini and Groq API keys (paste, Test, Remove). |
+| `Pages/NotesSettingsPage.cs` | Notes folder and file type; listening (macOS: shortcut, language heard, translation language and model: local, Gemini or Groq; line speed; translate while speaking); translation (to come). |
+| `Pages/ModelsPage.cs` | Managing models (choosing happens on the feature pages): every speech and language model with its state (which feature uses it, downloaded, downloading) and Download/Cancel/Delete; memory and idle unload; the models folder; the Gemini and Groq API keys (paste, Test, Remove, Usage). |
 | `TranscriptWindow.cs` | A dictation's text, editable, with Copy. |
 
 ### `WhisperLocal` — Windows app
@@ -155,7 +156,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Ui/Hud.cs` | Shared setup for the floating panels: non-activating, on every desktop and over full-screen apps; logs when macOS keeps one hidden. |
 | `Ui/RecordingOverlay.cs` | Indicator at the bottom: live seconds while recording/processing, then a summary with a Text button; a fresh panel per dictation. |
 | `Ui/PolishPanel.cs` | Grammar check proposal with changed words highlighted; insert, copy or close. |
-| `Ui/ListenPanel.cs` | Listening indicator: elapsed time, language menu, notes and stop buttons, and the session's lines in a scrolling list (translations side by side, the sentence being spoken greyed); resizable, keeps its size and place. |
+| `Ui/ListenPanel.cs` | Listening indicator: elapsed time, language menu, notes and stop buttons, and the session's lines in a scrolling list (translations side by side, the sentence being spoken and its translation greyed); resizable, keeps its size and place. |
 | `Ui/AutocompletePanel.cs` | Ghost-text panel for autocomplete (shelved). |
 | `Ui/ActionTarget.cs` | One Objective-C object that receives menu and button clicks and dispatches them by tag. |
 | `Ui/Dialogs.cs` | Native alerts, notifications and opening files/URLs. |

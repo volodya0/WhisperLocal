@@ -110,6 +110,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _listener.Finished += OnListenLineFinished;
         _listener.Failed += _listenPanel.ShowProblem;
         _listener.Provisional += _listenPanel.ShowProvisional;
+        _listener.ProvisionalTranslation += _listenPanel.ShowProvisionalTranslation;
         _overlay = new RecordingOverlay(_ui, ShowLastTranscript);
         _completionPanel = new AutocompletePanel();
         _polishPanel = new PolishPanel(_ui, () => _ = InsertProposalAsync(), CopyProposal);
@@ -318,7 +319,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (_llama.IsLoaded)
         {
             var name = PlainName(LlmModels.Find(LlamaServer.ResolveModel(cfg.LocalLlm))?.Title) ?? Path.GetFileName(cfg.LocalLlm.ModelPath);
-            var uses = (cfg.Polish.Enabled, _listening != null && _listener.TranslateTo.Length > 0) switch
+            var uses = (cfg.Polish.Enabled, IsTranslatingLocally) switch
             {
                 (true, true) => "Language model: grammar check and translation",
                 (false, true) => "Language model: translation",
@@ -593,7 +594,14 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     // ---- Language model: autocomplete and grammar check ----
 
     private bool IsLanguageModelWanted =>
-        _config.Current.Autocomplete.IsOn || _config.Current.Polish.Enabled || (_listening != null && _listener.TranslateTo.Length > 0);
+        _config.Current.Autocomplete.IsOn || _config.Current.Polish.Enabled || IsTranslatingLocally;
+
+    /// <summary>Listening translates, with the local model (not Gemini or Groq).</summary>
+    private bool IsTranslatingLocally =>
+        _listening != null && _listener.TranslateTo.Length > 0 && Translator.CloudName(_config.Current) == null;
+
+    /// <summary>Something can translate: a cloud engine with its key, or the local model installed.</summary>
+    private bool CanTranslate => Translator.CloudName(_config.Current) != null || IsLanguageModelInstalled;
 
     /// <summary>llama-server and the model are in place (the server starts on demand).</summary>
     private bool IsLanguageModelInstalled
@@ -789,8 +797,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             return;
         }
 
-        // Translation needs the language model; without it the choice waits until it is downloaded
-        var language = IsLanguageModelInstalled ? cfg.Listen.TranslateTo.Trim() : "";
+        // Translation needs a language model; without one the choice waits until it is downloaded (or a key added)
+        var language = CanTranslate ? cfg.Listen.TranslateTo.Trim() : "";
         _listener.TranslateTo = language;
         _notes = new ListenNotes(NotesFolder, cfg.Notes.Extension);
         var listening = _listening = new CancellationTokenSource();
@@ -800,7 +808,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _listenPanel.Show(cfg.Listen.Languages, language);
         UpdateMenuState();
         _ = WarmUpWhisperAsync();
-        if (language.Length > 0)
+        if (IsTranslatingLocally)
             _ = PreloadLanguageModelAsync();
         _listenTask = RunListeningAsync(listening);
     }
@@ -868,15 +876,15 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     /// <summary>The indicator's language menu: applies from the next line on, and is remembered for the next time.</summary>
     private bool ChooseListenLanguage(string code)
     {
-        if (code.Length > 0 && !IsLanguageModelInstalled)
+        if (code.Length > 0 && !CanTranslate)
         {
-            Dialogs.Notify("Translation uses a language model: download one on the Models page");
+            Dialogs.Notify("Translation uses a language model: download one, or add a Gemini or Groq key, on the Models page");
             _mainWindow.ShowModels();
             return false;
         }
         _listener.TranslateTo = code;
         Log.Info(code.Length > 0 ? $"Listening: translating into {code}" : "Listening: original only");
-        if (code.Length > 0)
+        if (IsTranslatingLocally)
             _ = PreloadLanguageModelAsync();
         try
         {

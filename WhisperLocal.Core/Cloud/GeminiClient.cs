@@ -11,12 +11,15 @@ public static class GeminiClient
     /// <summary>Where a key is made: Google AI Studio, free, no card needed.</summary>
     public const string KeyPage = "https://aistudio.google.com/apikey";
 
+    /// <summary>Requests and limits used by the user's keys, in Google AI Studio.</summary>
+    public const string UsagePage = "https://aistudio.google.com/usage";
+
     private const string BaseUrl = "https://generativelanguage.googleapis.com/v1beta/";
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
-    // Transcription sets its own timeout per request (Cloud.TimeoutSec)
-    private static readonly HttpClient TranscribeHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
+    // Transcription and text requests set their own timeout per request
+    private static readonly HttpClient RequestHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
 
     /// <summary>
     /// Checks a key by listing the models it may use (costs no quota). Returns null if the key works, otherwise
@@ -71,6 +74,50 @@ public static class GeminiClient
             ["generationConfig"] = new JsonObject { ["temperature"] = 0 },
         };
 
+        var text = await GenerateAsync(key, model, body, timeout, ct);
+        CloudUsage.RecordSpeech("Gemini", wav.Length);
+        return text;
+    }
+
+    /// <summary>
+    /// A text request: <paramref name="system"/> and <paramref name="user"/> in, the answer out, as JSON matching
+    /// {"text": "…"} (the reply format the translation prompt asks for). Throws <see cref="GeminiException"/> like
+    /// <see cref="TranscribeAsync"/>.
+    /// </summary>
+    public static async Task<string> ChatJsonAsync(string key, string model, string system, string user, double temperature, TimeSpan timeout,
+        CancellationToken ct)
+    {
+        var body = new JsonObject
+        {
+            ["system_instruction"] = new JsonObject { ["parts"] = new JsonArray(new JsonObject { ["text"] = system }) },
+            ["contents"] = new JsonArray(new JsonObject
+            {
+                ["role"] = "user",
+                ["parts"] = new JsonArray(new JsonObject { ["text"] = user }),
+            }),
+            ["generationConfig"] = new JsonObject
+            {
+                ["temperature"] = temperature,
+                ["responseMimeType"] = "application/json",
+                ["responseSchema"] = new JsonObject
+                {
+                    ["type"] = "OBJECT",
+                    ["properties"] = new JsonObject { ["text"] = new JsonObject { ["type"] = "STRING" } },
+                    ["required"] = new JsonArray("text"),
+                },
+            },
+        };
+        var text = await GenerateAsync(key, model, body, timeout, ct, tokens => CloudUsage.RecordText("Gemini", tokens));
+        return text;
+    }
+
+    /// <summary>
+    /// One generateContent call; returns the answer's text (without thought summaries). <paramref name="onTokens"/>
+    /// gets the tokens the answer reports (usageMetadata); a refusal for the limit is noted in <see cref="CloudUsage"/>.
+    /// </summary>
+    private static async Task<string> GenerateAsync(string key, string model, JsonObject body, TimeSpan timeout, CancellationToken ct,
+        Action<long?>? onTokens = null)
+    {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout);
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}models/{Uri.EscapeDataString(model)}:generateContent")
@@ -82,8 +129,10 @@ public static class GeminiClient
         string json;
         try
         {
-            using var response = await TranscribeHttp.SendAsync(request, timeoutCts.Token);
+            using var response = await RequestHttp.SendAsync(request, timeoutCts.Token);
             json = await response.Content.ReadAsStringAsync(timeoutCts.Token);
+            if (CloudUsage.IsLimit(response.StatusCode))
+                CloudUsage.RecordLimitHit("Gemini", ErrorMessage(json), response.Headers);
             if (!response.IsSuccessStatusCode)
                 throw new GeminiException($"HTTP {(int)response.StatusCode}: {ErrorMessage(json)}");
         }
@@ -99,14 +148,15 @@ public static class GeminiClient
         try
         {
             var root = JsonNode.Parse(json);
+            onTokens?.Invoke(root?["usageMetadata"]?["totalTokenCount"]?.GetValue<long>());
             var candidate = root?["candidates"]?[0];
             // No candidate: the prompt was blocked (promptFeedback says why)
             if (candidate == null)
-                throw new GeminiException("no transcript: " + (root?["promptFeedback"]?["blockReason"]?.GetValue<string>() ?? "empty answer"));
+                throw new GeminiException("no answer: " + (root?["promptFeedback"]?["blockReason"]?.GetValue<string>() ?? "empty answer"));
             var text = new StringBuilder();
             foreach (var part in candidate["content"]?["parts"]?.AsArray() ?? [])
             {
-                // Thinking models may return thought summaries; only the answer is the transcript
+                // Thinking models may return thought summaries; only the answer counts
                 if (part?["thought"]?.GetValue<bool>() == true)
                     continue;
                 text.Append(part?["text"]?.GetValue<string>());

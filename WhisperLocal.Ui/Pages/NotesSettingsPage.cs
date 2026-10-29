@@ -18,6 +18,18 @@ internal sealed class NotesSettingsPage : Page
 {
     private static readonly (string Title, string Extension)[] Formats = [("Markdown (.md)", ".md"), ("Plain text (.txt)", ".txt")];
 
+    /// <summary>How quickly a line ends (Listen.PauseMs, Listen.MaxSegmentSec) and the text so far shows (Listen.ProvisionalMs).</summary>
+    private static readonly (string Title, int PauseMs, int MaxSegmentSec, int ProvisionalMs, string Hint)[] Speeds =
+    [
+        ("Fast", 350, 6, 500, "Short lines, a moment after the words; a sentence may be split in two."),
+        ("Balanced", 500, 10, 800, "Lines end at short pauses or every 10 seconds."),
+        ("Accurate", 600, 20, 1000, "Whole sentences, up to 20 seconds; the most context for recognition."),
+    ];
+
+    /// <summary>How often the sentence being spoken is translated (Listen.TranslateWhileSpeakingMs).</summary>
+    private static readonly (string Title, int Ms)[] LiveTranslations =
+        [("Off: finished lines only", 0), ("Every 2 seconds", 2000), ("Every second", 1000), ("As fast as possible", 250)];
+
     private readonly IAppHost _host;
     private readonly SelectableTextBlock _folder = new() { Foreground = DarkTheme.Text, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly Button _default;
@@ -28,17 +40,21 @@ internal sealed class NotesSettingsPage : Page
     private readonly ComboBox _heard = DarkTheme.Dropdown(190);
     private readonly ComboBox _translateTo = DarkTheme.Dropdown(190);
     private readonly ComboBox _translationModel = DarkTheme.Dropdown(290);
+    private readonly ComboBox _speed = DarkTheme.Dropdown(190);
+    private readonly ComboBox _liveTranslation = DarkTheme.Dropdown(190);
     private readonly TextBlock _modelMissing = DarkTheme.Label("", 12, brush: DarkTheme.Warning);
     private readonly Grid _modelMissingRow = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
     private readonly Button _showModels;
     private readonly Note _listenNote = new();
     private readonly TextBlock _speechModel = DarkTheme.MutedLabel("", 11);
+    private readonly TextBlock _translationCloud = DarkTheme.MutedLabel("", 11);
     private string? _shownFolder;
     private string? _shownFormat;
     private string? _shownListen;
     private List<string> _heardCodes = [];
     private List<string> _translateCodes = [];
-    private List<string> _modelPaths = [];
+    private List<TranslationChoice> _modelChoices = [];
+    private List<int> _liveTranslationValues = [];
     private bool _recording;
     private bool _updating;
 
@@ -103,14 +119,27 @@ internal sealed class NotesSettingsPage : Page
             if (!_updating && i >= 0 && i < _translateCodes.Count)
                 Widgets.Save(_host, "Listen", "TranslateTo", _translateCodes[i], _listenNote);
         };
-        // The same language model as the grammar check: one model in memory serves both
-        _translationModel.SelectionChanged += (_, _) =>
+        _translationModel.SelectionChanged += (_, _) => OnTranslationModelSelected();
+        _speed.SelectionChanged += (_, _) =>
         {
-            var i = _translationModel.SelectedIndex;
-            if (!_updating && i >= 0 && i < _modelPaths.Count)
-                Widgets.Save(_host, "LocalLlm", "ModelPath", _modelPaths[i], _listenNote);
+            var i = _speed.SelectedIndex;
+            if (_updating || i < 0 || i >= Speeds.Length)
+                return;
+            Widgets.Save(_host, "Listen", "PauseMs", Speeds[i].PauseMs, _listenNote);
+            Widgets.Save(_host, "Listen", "MaxSegmentSec", Speeds[i].MaxSegmentSec, _listenNote);
+            Widgets.Save(_host, "Listen", "ProvisionalMs", Speeds[i].ProvisionalMs, _listenNote);
         };
-        ToolTip.SetTip(_translationModel, "The local language model that translates; the grammar check uses the same one");
+        _liveTranslation.SelectionChanged += (_, _) =>
+        {
+            var i = _liveTranslation.SelectedIndex;
+            if (!_updating && i >= 0 && i < _liveTranslationValues.Count)
+                Widgets.Save(_host, "Listen", "TranslateWhileSpeakingMs", _liveTranslationValues[i], _listenNote);
+        };
+        ToolTip.SetTip(_liveTranslation,
+            "Translates the sentence while it is still being spoken, greyed, then the finished line replaces it. " +
+            "Quickest with Gemini or Groq; the local model shares the computer with recognition");
+        ToolTip.SetTip(_translationModel,
+            "The language model that translates: a local one (the grammar check uses the same one), or a cloud one once its key is added on the Models page");
 
         _modelMissing.TextWrapping = TextWrapping.Wrap;
         _modelMissing.VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
@@ -132,7 +161,10 @@ internal sealed class NotesSettingsPage : Page
                 Widgets.Fields(("Shortcut", shortcut)),
                 Widgets.Fields(("Heard in", _heard), ("Translate into", _translateTo)),
                 Widgets.Fields(("Translation model", _translationModel)),
+                Widgets.Fields(("Line speed", _speed)),
+                Widgets.Fields(("Translate while speaking", _liveTranslation)),
                 _modelMissingRow,
+                _translationCloud,
                 _speechModel,
                 _listenNote.Line,
             },
@@ -175,7 +207,10 @@ internal sealed class NotesSettingsPage : Page
             return;
         RefreshModelMissing(cfg);
         RefreshSpeechModel(cfg);
-        var signature = $"{listen.Hotkey}|{listen.Language}|{listen.TranslateTo}|{string.Join(",", listen.Languages)}|{cfg.LocalLlm.ModelPath}";
+        var signature = $"{listen.Hotkey}|{listen.Language}|{listen.TranslateTo}|{string.Join(",", listen.Languages)}|{cfg.LocalLlm.ModelPath}|" +
+                        $"{listen.TranslateEngine}|{cfg.Cloud.GeminiTextModel}|{cfg.Cloud.GroqTextModel}|" +
+                        $"{cfg.Cloud.GeminiApiKey.Trim().Length > 0}|{cfg.Cloud.GroqApiKey.Trim().Length > 0}|" +
+                        $"{listen.PauseMs}|{listen.MaxSegmentSec}|{listen.ProvisionalMs}|{listen.TranslateWhileSpeakingMs}";
         if (signature == _shownListen || _recording)
             return;
         _shownListen = signature;
@@ -198,20 +233,101 @@ internal sealed class NotesSettingsPage : Page
         _translateTo.ItemsSource = _translateCodes.Select(c => c.Length == 0 ? "Original only" : Translator.NativeName(c)).ToList();
         _translateTo.SelectedIndex = _translateCodes.IndexOf(target);
 
-        var model = cfg.LocalLlm.ModelPath;
-        var titles = LlmModels.Catalog.Select(m => $"{m.Title} · {m.Size}").ToList();
-        _modelPaths = LlmModels.Catalog.Select(m => "models/" + m.File).ToList();
-        var index = LlmModels.Find(model) is { } known ? LlmModels.Catalog.ToList().IndexOf(known) : -1;
-        if (index < 0)
-        {
-            titles.Add($"Custom: {Path.GetFileName(model)}");
-            _modelPaths.Add(model);
-            index = titles.Count - 1;
-        }
-        _translationModel.ItemsSource = titles;
+        RefreshSpeed(listen);
+
+        _modelChoices = TranslationChoices(cfg, out var index);
+        _translationModel.ItemsSource = _modelChoices.Select(c => c.Title).ToList();
         _translationModel.SelectedIndex = index;
 
         _updating = false;
+    }
+
+    /// <summary>The line speed preset matching the config ("Custom" when edited by hand) and the live translation interval.</summary>
+    private void RefreshSpeed(ListenConfig listen)
+    {
+        var titles = Speeds.Select(s => s.Title).ToList();
+        var index = Array.FindIndex(Speeds, s => s.PauseMs == listen.PauseMs && s.MaxSegmentSec == listen.MaxSegmentSec && s.ProvisionalMs == listen.ProvisionalMs);
+        if (index < 0)
+        {
+            titles.Add($"Custom: {listen.PauseMs} ms pause, {listen.MaxSegmentSec} s");
+            index = titles.Count - 1;
+        }
+        _speed.ItemsSource = titles;
+        _speed.SelectedIndex = index;
+        ToolTip.SetTip(_speed, index < Speeds.Length ? Speeds[index].Hint : "Set in the config (Listen.PauseMs, Listen.MaxSegmentSec, Listen.ProvisionalMs).");
+
+        var liveTitles = LiveTranslations.Select(l => l.Title).ToList();
+        _liveTranslationValues = LiveTranslations.Select(l => l.Ms).ToList();
+        var live = _liveTranslationValues.IndexOf(Math.Max(0, listen.TranslateWhileSpeakingMs));
+        if (live < 0)
+        {
+            liveTitles.Add($"Every {listen.TranslateWhileSpeakingMs} ms");
+            _liveTranslationValues.Add(listen.TranslateWhileSpeakingMs);
+            live = liveTitles.Count - 1;
+        }
+        _liveTranslation.ItemsSource = liveTitles;
+        _liveTranslation.SelectedIndex = live;
+        // The sentence being spoken is translated only when its text is shown
+        _liveTranslation.IsEnabled = listen.ProvisionalMs > 0;
+    }
+
+    // ---- Translation model: local language models and, with a key, cloud ones ----
+
+    /// <summary>
+    /// A translation model: local (<paramref name="Engine"/> "Local", <paramref name="Value"/> is LocalLlm.ModelPath)
+    /// or cloud ("Gemini" or "Groq", <paramref name="Value"/> is Cloud.GeminiTextModel or Cloud.GroqTextModel).
+    /// </summary>
+    private sealed record TranslationChoice(string Title, string Engine, string Value);
+
+    private static readonly (string Engine, string Vendor, string Property, (string Title, string Id)[] Models)[] CloudTextModels =
+    [
+        ("Gemini", "Google", "GeminiTextModel", [("Gemini Flash-Lite", "gemini-flash-lite-latest"), ("Gemini Flash", "gemini-flash-latest")]),
+        ("Groq", "Groq", "GroqTextModel", [("Llama 3.3 70B", "llama-3.3-70b-versatile"), ("Llama 3.1 8B", "llama-3.1-8b-instant")]),
+    ];
+
+    private static string CloudKey(AppConfig c, string engine) => (engine == "Groq" ? c.Cloud.GroqApiKey : c.Cloud.GeminiApiKey).Trim();
+
+    private static string CloudTextModel(AppConfig c, string engine) => engine == "Groq" ? c.Cloud.GroqTextModel : c.Cloud.GeminiTextModel;
+
+    /// <summary>Every local model, the cloud ones with a key, and always the current choice (even without its key).</summary>
+    private static List<TranslationChoice> TranslationChoices(AppConfig cfg, out int index)
+    {
+        var model = cfg.LocalLlm.ModelPath;
+        var choices = LlmModels.Catalog.Select(m => new TranslationChoice($"{m.Title} · {m.Size}", "Local", "models/" + m.File)).ToList();
+        if (LlmModels.Find(model) == null)
+            choices.Add(new TranslationChoice($"Custom: {Path.GetFileName(model)}", "Local", model));
+        foreach (var (engine, vendor, _, models) in CloudTextModels.Where(p => CloudKey(cfg, p.Engine).Length > 0))
+            choices.AddRange(models.Select(m => new TranslationChoice($"{m.Title} · {vendor} cloud", engine, m.Id)));
+
+        var wanted = CloudTextModels.FirstOrDefault(p => string.Equals(cfg.Listen.TranslateEngine, p.Engine, StringComparison.OrdinalIgnoreCase));
+        if (wanted.Engine != null)
+        {
+            var current = CloudTextModel(cfg, wanted.Engine);
+            index = choices.FindIndex(c => c.Engine == wanted.Engine && c.Value == current);
+            if (index >= 0)
+                return choices;
+            var title = wanted.Models.FirstOrDefault(m => m.Id == current).Title ?? current;
+            choices.Add(new TranslationChoice(CloudKey(cfg, wanted.Engine).Length > 0 ? $"{title} · {wanted.Vendor} cloud" : $"{title} · needs an API key",
+                wanted.Engine, current));
+            index = choices.Count - 1;
+            return choices;
+        }
+        index = choices.FindIndex(c => c.Engine == "Local" && (c.Value == model || LlmModels.Find(c.Value) is { } m && m == LlmModels.Find(model)));
+        return choices;
+    }
+
+    /// <summary>The engine follows the model; a local model is the same one the grammar check uses.</summary>
+    private void OnTranslationModelSelected()
+    {
+        var i = _translationModel.SelectedIndex;
+        if (_updating || i < 0 || i >= _modelChoices.Count)
+            return;
+        var choice = _modelChoices[i];
+        if (CloudTextModels.FirstOrDefault(p => p.Engine == choice.Engine) is { Engine: not null } provider)
+            Widgets.Save(_host, "Cloud", provider.Property, choice.Value, _listenNote);
+        else
+            Widgets.Save(_host, "LocalLlm", "ModelPath", choice.Value, _listenNote);
+        Widgets.Save(_host, "Listen", "TranslateEngine", choice.Engine, _listenNote);
     }
 
     /// <summary>Which speech model listening hears with: the local one set up in Speech to Text, even when dictation uses the cloud.</summary>
@@ -234,10 +350,18 @@ internal sealed class NotesSettingsPage : Page
     /// <summary>A translation language is chosen but its model is not downloaded: say so, with a way to Models.</summary>
     private void RefreshModelMissing(AppConfig cfg)
     {
-        var missing = cfg.Listen.TranslateTo.Trim().Length > 0 && !File.Exists(AppPaths.Resolve(cfg.LocalLlm.ModelPath));
-        _modelMissingRow.IsVisible = missing;
-        if (missing)
-            _modelMissing.Text = "The translation model is not downloaded yet: download it on the Models page.";
+        var translating = cfg.Listen.TranslateTo.Trim().Length > 0;
+        var cloud = Translator.CloudName(cfg);
+        var wanted = CloudTextModels.FirstOrDefault(p => string.Equals(cfg.Listen.TranslateEngine, p.Engine, StringComparison.OrdinalIgnoreCase));
+        string? problem = null;
+        if (wanted.Engine != null && cloud == null)
+            problem = $"{wanted.Engine} needs an API key: add it on the Models page. Until then the local model translates.";
+        else if (translating && cloud == null && !File.Exists(AppPaths.Resolve(cfg.LocalLlm.ModelPath)))
+            problem = "The translation model is not downloaded yet: download it on the Models page.";
+        _modelMissingRow.IsVisible = problem != null;
+        _modelMissing.Text = problem ?? "";
+        _translationCloud.IsVisible = cloud != null;
+        _translationCloud.Text = $"The text of each line is sent to {(cloud == "Groq" ? "Groq" : "Google")} to translate; the audio stays on this Mac.";
     }
 
     private void ToggleShortcutRecording()

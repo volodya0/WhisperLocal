@@ -159,18 +159,23 @@
     "TimeoutMs": 15000
   },
   // Listening (macOS 14.2+): the shortcut starts transcribing what the Mac plays into a note in Notes.Folder; stop it
-  // with the indicator's stop button. The indicator's menu picks a translation language (uses the LocalLlm model)
+  // with the indicator's stop button. The indicator's menu picks a translation language
   "Listen": {
     "Hotkey": "LeftControl+LeftOption+L",
     // Language of what is heard: "auto" detects it, or a code like "en"
     "Language": "auto",
     // Translate into this language ("uk", "en", …); "" keeps the original only
     "TranslateTo": "",
+    // What translates: "Local" (the LocalLlm model), "Gemini" (Cloud.GeminiTextModel) or "Groq" (Cloud.GroqTextModel)
+    "TranslateEngine": "Local",
     "Languages": [ "uk", "en", "de", "pl", "es", "fr" ],
-    "PauseMs": 600,
-    "MaxSegmentSec": 20,
+    // How quickly lines come (Notes & Translate → Line speed): a pause this long, or this many seconds, ends a line
+    "PauseMs": 500,
+    "MaxSegmentSec": 10,
     // While a sentence is being spoken, show its text so far (greyed) about this often, in ms; 0 = off
-    "ProvisionalMs": 1000
+    "ProvisionalMs": 800,
+    // ...and translate it (greyed) at most this often, in ms; 0 = translate only finished lines
+    "TranslateWhileSpeakingMs": 0
   },
   "Insert": {
     "AppendTrailingSpace": true,
@@ -194,6 +199,9 @@
     "GroqApiKey": "",
     // Whisper model on Groq: "whisper-large-v3-turbo" (faster) or "whisper-large-v3" (most accurate)
     "GroqModel": "whisper-large-v3-turbo",
+    // Language models for translation: Gemini ("gemini-flash-lite-latest" answers fastest) and Groq
+    "GeminiTextModel": "gemini-flash-lite-latest",
+    "GroqTextModel": "llama-3.3-70b-versatile",
     "TimeoutSec": 30
   },
   "Ui": {

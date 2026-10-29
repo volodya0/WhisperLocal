@@ -83,14 +83,20 @@ attention) at the bottom.
     with the last local model you chose. Listening uses that same local model.
   - **Post-processing** — the grammar check (see below) and the correction rules for words Whisper mishears.
 - **Notes & Translate** — which folder holds the notes, and whether new ones are Markdown or plain text; on macOS,
-  **Listening** (see below): its shortcut, the language heard, the translation language and the translation model.
+  **Listening** (see below): its shortcut, the language heard, the translation language and the translation model;
+  **Line speed** (Fast, Balanced or Accurate: how soon a line ends) and **Translate while speaking** (translate the
+  sentence still being spoken, every 2 s, every second or as fast as possible).
 - **Models** — managing models, not choosing them (that happens on the page of the feature that uses one): every
   speech and language model, downloaded or not and which feature uses it, with **Download** and **Delete** (the model
   in use cannot be deleted); **Memory**, the models loaded right now and how much memory each uses, with **Unload All**
   and after how long without use they unload by themselves (5 minutes by default); the folder the models are
   downloaded to; and **Cloud**, where
   you can paste a Google Gemini API key (free from Google AI Studio, **Get a Key**) or a Groq API key (free from the
-  Groq console) and **Test** it; that provider's models then appear in Speech to Text → Model.
+  Groq console) and **Test** it; that provider's models then appear in Speech to Text → Model and, on macOS, in Notes &
+  Translate → Translation model. **Usage** opens the provider's page with the requests and limits you have used. Under each connected provider,
+  a line shows what WhisperLocal itself sent today (recordings, translations, tokens), the last minute, how much of
+  Groq's limits is left, and a limit reached recently; it turns orange when the provider is near its limit, and then
+  live translation of unfinished phrases pauses so finished lines keep getting through.
 
 Everything else (start at login, which microphone, English terms that get misheard…) is in the config file: see
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Changes apply as soon as you save it.
@@ -111,8 +117,11 @@ Recording.
 A panel above the indicator shows the sentences so far, and the one still being spoken greyed at the bottom; scroll
 up to read earlier ones, and drag its edges to make it larger. It keeps its size and place for the next time. Its menu
 translates them: **Original**, or a language such as Українська or English; the translation then stands next to each
-sentence. When translated, every line is written in both languages. The translation uses the local language model,
-so download one on the **Models** page first. The language you pick is remembered.
+sentence. When translated, every line is written in both languages. The translation uses the model chosen on Notes &
+Translate → **Translation model**: a local language model (download one on the **Models** page first) or, once its
+key is added, Gemini or Groq, which need no download but get the text of each line. With **Translate while
+speaking** on, the sentence still being spoken is translated too, greyed, and the finished line replaces it. The
+language you pick is remembered.
 
 The panel stays until you click its **stop** button (pressing the shortcut again only brings it back); the folder
 button opens the note. Each session is a note with times in your notes folder, so it is on the **Notes** page. The
@@ -153,7 +162,8 @@ is downloading models from HuggingFace and, when you ask for it, checking GitHub
 Groq API key with Google or Groq.
 With Gemini as the recognition engine, each recording is sent to Google's Gemini API; on the free tier Google may use
 it to improve its products (see Google's terms). With Groq, each recording is sent to Groq's API (see Groq's terms). Recordings are not saved (listening keeps only the text, in its note). Listening always
-recognises locally, even with a cloud model. The log and the dictation history keep
+recognises locally, even with a cloud model; with Gemini or Groq as the translation model, the text of each line is
+sent there to be translated. The log and the dictation history keep
 the text of your dictations to help with troubleshooting; set `Logging.LogText` to `false` in the config to stop
 that.
 

@@ -10,19 +10,22 @@ namespace WhisperLocal.Cloud;
 
 /// <summary>
 /// Groq API (api.groq.com, OpenAI-compatible) with the user's own key from the Groq console: the same Whisper models
-/// as on this computer, run on Groq's hardware in a fraction of a second.
+/// as on this computer, run on Groq's hardware in a fraction of a second, and open language models for text.
 /// </summary>
 public static class GroqClient
 {
     /// <summary>Where a key is made: the Groq console, free, no card needed.</summary>
     public const string KeyPage = "https://console.groq.com/keys";
 
+    /// <summary>Requests and tokens used, in the Groq console.</summary>
+    public const string UsagePage = "https://console.groq.com/dashboard/usage";
+
     private const string BaseUrl = "https://api.groq.com/openai/v1/";
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
-    // Transcription sets its own timeout per request (Cloud.TimeoutSec)
-    private static readonly HttpClient TranscribeHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
+    // Transcription and text requests set their own timeout per request
+    private static readonly HttpClient RequestHttp = new() { Timeout = Timeout.InfiniteTimeSpan };
 
     /// <summary>
     /// Checks a key by listing the models it may use (costs no quota). Returns null if the key works, otherwise
@@ -99,8 +102,65 @@ public static class GroqClient
         string json;
         try
         {
-            using var response = await TranscribeHttp.SendAsync(request, timeoutCts.Token);
+            using var response = await RequestHttp.SendAsync(request, timeoutCts.Token);
             json = await response.Content.ReadAsStringAsync(timeoutCts.Token);
+            Note(response, json);
+            if (!response.IsSuccessStatusCode)
+                throw new GroqException($"HTTP {(int)response.StatusCode}: {ErrorMessage(json)}");
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new GroqException($"no answer within {timeout.TotalSeconds:F0} s");
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new GroqException(ex.Message);
+        }
+
+        CloudUsage.RecordSpeech("Groq", wav.Length);
+        try
+        {
+            var root = JsonNode.Parse(json);
+            return (root?["text"]?.GetValue<string>()?.Trim() ?? "", root?["language"]?.GetValue<string>() ?? "");
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            throw new GroqException("unreadable answer: " + ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// A text request (chat completions in JSON mode): <paramref name="system"/> and <paramref name="user"/> in, the
+    /// answer out as a JSON object; the prompt says which fields (it has to mention JSON for Groq to accept the mode).
+    /// Throws <see cref="GroqException"/> like <see cref="TranscribeAsync"/>.
+    /// </summary>
+    public static async Task<string> ChatJsonAsync(string key, string model, string system, string user, double temperature, TimeSpan timeout,
+        CancellationToken ct)
+    {
+        var body = new JsonObject
+        {
+            ["model"] = model,
+            ["messages"] = new JsonArray(
+                new JsonObject { ["role"] = "system", ["content"] = system },
+                new JsonObject { ["role"] = "user", ["content"] = user }),
+            ["temperature"] = temperature,
+            ["response_format"] = new JsonObject { ["type"] = "json_object" },
+        };
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(timeout);
+        using var request = new HttpRequestMessage(HttpMethod.Post, BaseUrl + "chat/completions")
+        {
+            Content = new StringContent(body.ToJsonString(), System.Text.Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+
+        string json;
+        try
+        {
+            using var response = await RequestHttp.SendAsync(request, timeoutCts.Token);
+            json = await response.Content.ReadAsStringAsync(timeoutCts.Token);
+            Note(response, json);
             if (!response.IsSuccessStatusCode)
                 throw new GroqException($"HTTP {(int)response.StatusCode}: {ErrorMessage(json)}");
         }
@@ -116,12 +176,22 @@ public static class GroqClient
         try
         {
             var root = JsonNode.Parse(json);
-            return (root?["text"]?.GetValue<string>()?.Trim() ?? "", root?["language"]?.GetValue<string>() ?? "");
+            CloudUsage.RecordText("Groq", root?["usage"]?["total_tokens"]?.GetValue<long>());
+            return root?["choices"]?[0]?["message"]?["content"]?.GetValue<string>()?.Trim()
+                   ?? throw new GroqException("no answer: empty choices");
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             throw new GroqException("unreadable answer: " + ex.Message);
         }
+    }
+
+    /// <summary>Groq's limits come with every answer; a refusal for the limit is noted too.</summary>
+    private static void Note(HttpResponseMessage response, string json)
+    {
+        CloudUsage.RecordGroqHeaders(response.Headers);
+        if (CloudUsage.IsLimit(response.StatusCode))
+            CloudUsage.RecordLimitHit("Groq", ErrorMessage(json), response.Headers);
     }
 
     /// <summary>The "message" of an OpenAI-style error body, or the start of the body.</summary>

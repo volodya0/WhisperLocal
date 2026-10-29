@@ -47,6 +47,8 @@ relative to the data folder.
 | `Cloud.GeminiModel` | Gemini model for recognition: `gemini-flash-latest` (default) or `gemini-flash-lite-latest` (faster), or any Gemini model id that accepts audio. |
 | `Cloud.GroqApiKey` | Your Groq API key (from the [Groq console](https://console.groq.com/keys)); set on the Models page, kept here as plain text. |
 | `Cloud.GroqModel` | Whisper model on Groq: `whisper-large-v3-turbo` (default, faster) or `whisper-large-v3` (most accurate). |
+| `Cloud.GeminiTextModel` | Gemini model for translation: `gemini-flash-lite-latest` (default, fastest) or `gemini-flash-latest`, or any Gemini text model id. |
+| `Cloud.GroqTextModel` | Groq language model for translation: `llama-3.3-70b-versatile` (default) or `llama-3.1-8b-instant` (faster), or any Groq chat model that supports JSON mode. |
 | `Cloud.TimeoutSec` | A cloud request taking longer is given up (default 30). |
 | `Ui.ShowOverlay` | Show the indicator at the bottom of the screen. |
 | `Ui.ResultSeconds` | How long the indicator shows a dictation's summary. |
@@ -99,13 +101,15 @@ CPU; `-ng` runs on the CPU only.
 | `Listen.Hotkey` | Starts listening (key names as for `Hotkey.Key`); `""` turns the shortcut off. Default `LeftControl+LeftOption+L`. |
 | `Listen.Language` | Language of what is heard: `"auto"` detects it per segment, a code (`"en"`) fixes it. |
 | `Listen.TranslateTo` | Translate into this language (`"uk"`, `"en"`, …), `""` for the original only. Set from the indicator's menu. |
+| `Listen.TranslateEngine` | What translates: `"Local"` (the `LocalLlm` model, the default), `"Gemini"` (`Cloud.GeminiTextModel`) or `"Groq"` (`Cloud.GroqTextModel`); the text of each line is then sent there. Without that provider's key, the local model translates. Chosen with Notes & Translate → Translation model. |
 | `Listen.Languages` | The languages the indicator's menu offers. |
-| `Listen.PauseMs`, `Listen.MaxSegmentSec` | A pause this long ends a segment; without a pause it is cut after this many seconds. |
+| `Listen.PauseMs`, `Listen.MaxSegmentSec` | A pause this long ends a segment; without a pause it is cut after this many seconds. Default 500 ms and 10 s; Notes & Translate → Line speed sets both with `Listen.ProvisionalMs` (Fast 350/6/500, Balanced 500/10/800, Accurate 600/20/1000). |
 | `Listen.ProvisionalMs` | While a sentence is being spoken, its text so far is shown greyed about this often (ms); `0` turns it off. |
+| `Listen.TranslateWhileSpeakingMs` | While a sentence is being spoken, its text so far is also translated (greyed) at most this often (ms); `0` (default) translates only finished lines. Notes & Translate → Translate while speaking: every 2 s, every second, or as fast as possible (250). Quickest with Gemini or Groq translating. |
 | `Listen.TranslateTimeoutMs`, `Listen.Temperature`, `Listen.TranslatePrompt` | How the language model translates (`{language}` in the prompt is the language name). |
 
 Each session is a note in the notes folder (`Notes.Folder`, `Notes.Extension`), so the Notes page lists it.
-Translation uses the `LocalLlm` model (the one the grammar check uses). Listening always recognises with local
+Translation uses the `LocalLlm` model (the one the grammar check uses), or Gemini or Groq (`Listen.TranslateEngine`). Listening always recognises with local
 Whisper, whatever `Recognition.Engine` says. The shortcut and the languages are on the Notes & Translate page.
 
 ## LLM cleanup through Ollama (optional)

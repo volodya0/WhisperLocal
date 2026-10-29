@@ -294,7 +294,8 @@ public sealed class PolishConfig
 
 /// <summary>
 /// Listening (macOS 14.2+): a shortcut starts transcribing system audio (a call, a video) into a notes file, optionally
-/// translated by the local LLM; it runs until the indicator's stop button is clicked.
+/// translated by a language model (local, or Gemini or Groq with the user's key); it runs until the indicator's stop
+/// button is clicked.
 /// </summary>
 public sealed class ListenConfig
 {
@@ -307,21 +308,35 @@ public sealed class ListenConfig
     /// <summary>Translate into this language ("uk", "en", …); "" keeps the original only. Changed from the indicator.</summary>
     public string TranslateTo { get; set; } = "";
 
+    /// <summary>
+    /// What translates: "Local" (the language model on this computer, LocalLlm.ModelPath), "Gemini"
+    /// (Cloud.GeminiTextModel) or "Groq" (Cloud.GroqTextModel); a cloud engine without its key translates locally.
+    /// </summary>
+    public string TranslateEngine { get; set; } = "Local";
+
     /// <summary>Languages offered in the indicator's menu.</summary>
     public List<string> Languages { get; set; } = ["uk", "en", "de", "pl", "es", "fr"];
 
+    // PauseMs, MaxSegmentSec and ProvisionalMs are set together by Notes & Translate → Line speed
+
     /// <summary>A pause this long ends a segment.</summary>
-    public int PauseMs { get; set; } = 600;
+    public int PauseMs { get; set; } = 500;
 
     /// <summary>A segment is cut here even without a pause (Whisper takes at most 30 s).</summary>
-    public int MaxSegmentSec { get; set; } = 20;
+    public int MaxSegmentSec { get; set; } = 10;
 
     /// <summary>While a sentence is being spoken, its text so far is shown (greyed) about this often; 0 turns it off.</summary>
-    public int ProvisionalMs { get; set; } = 1000;
+    public int ProvisionalMs { get; set; } = 800;
+
+    /// <summary>
+    /// While a sentence is being spoken, its text so far is translated (greyed) at most this often; 0 translates only
+    /// finished lines. Needs ProvisionalMs; fastest with Gemini or Groq translating.
+    /// </summary>
+    public int TranslateWhileSpeakingMs { get; set; } = 0;
 
     public double Temperature { get; set; } = 0.1;
 
-    /// <summary>Timeout of one translation once the model is loaded; on timeout the line stays untranslated.</summary>
+    /// <summary>Timeout of one translation once the model is loaded (or of one cloud request); on timeout the line stays untranslated.</summary>
     public int TranslateTimeoutMs { get; set; } = 20000;
 
     /// <summary>{language} is replaced with the language name.</summary>
@@ -362,6 +377,12 @@ public sealed class CloudConfig
 
     /// <summary>Whisper model on Groq for recognition: "whisper-large-v3-turbo" or "whisper-large-v3".</summary>
     public string GroqModel { get; set; } = "whisper-large-v3-turbo";
+
+    /// <summary>Gemini model for text (translation); Flash-Lite answers fastest.</summary>
+    public string GeminiTextModel { get; set; } = "gemini-flash-lite-latest";
+
+    /// <summary>Groq language model for text (translation).</summary>
+    public string GroqTextModel { get; set; } = "llama-3.3-70b-versatile";
 
     /// <summary>A cloud request taking longer than this is given up (and falls back to local recognition).</summary>
     public int TimeoutSec { get; set; } = 30;

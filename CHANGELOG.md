@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Models → Cloud shows usage under each connected provider: what WhisperLocal sent today (recordings and their
+  length, translations and tokens), requests in the last minute, Groq's limits left (requests today, tokens this
+  minute, from its answers) and a limit reached in the last hour. Counted on this computer, kept for the day in
+  `cloud-usage.json`. Near a provider's limit (a refused request, or Groq low on tokens or requests), live translation
+  of unfinished phrases pauses and the listening panel says so; finished lines keep being translated.
+- Listening is quicker. Notes & Translate → **Line speed**: Fast (a line ends at a 350 ms pause or after 6 s),
+  Balanced (500 ms or 10 s, now the default; was 600 ms or 20 s) or Accurate (600 ms or 20 s). **Translate while
+  speaking** translates the sentence still being spoken, greyed next to it, every 2 s, every second or as fast as
+  possible (`Listen.TranslateWhileSpeakingMs`, off by default); the finished line's translation replaces it. Finished
+  lines are translated two at a time, so one slow answer no longer holds up the next lines.
+- Listening translation with Gemini or Groq: once a key is added, Notes & Translate → Translation model lists Gemini
+  Flash-Lite and Flash, and Llama 3.3 70B and 3.1 8B on Groq, next to the local models (`Listen.TranslateEngine`,
+  `Cloud.GeminiTextModel`, `Cloud.GroqTextModel`). No language model to download or keep in memory; the text of each
+  line is sent to the provider, the audio still stays on the Mac. A failed request leaves that line untranslated.
+- Models → Cloud: a **Usage** button on each connected provider opens its page with the requests and limits used
+  (Google AI Studio, the Groq console).
 - Groq as a recognition engine: paste a Groq API key on Models → Cloud (free from the Groq console, **Get a Key**,
   `Cloud.GroqApiKey`) and *Whisper Large v3 Turbo* and *Whisper Large v3* on Groq appear in Speech to Text →
   Recognition → Model (`Recognition.Engine` `"Groq"`, `Cloud.GroqModel`). The same Whisper as on this computer, in

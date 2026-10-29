@@ -1,11 +1,15 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using WhisperLocal.Cloud;
 using WhisperLocal.Config;
 
 namespace WhisperLocal.Llm;
 
-/// <summary>Live translation: the local LLM translates one segment of a transcript, with the text before it as context.</summary>
+/// <summary>
+/// Live translation: a language model translates one segment of a transcript, with the text before it as context. The
+/// model is the local one, or Gemini or Groq with the user's key (Listen.TranslateEngine).
+/// </summary>
 public sealed class Translator
 {
     // English name for the prompt, own name for the menu
@@ -32,11 +36,23 @@ public sealed class Translator
 
     public static string EnglishName(string code) => Names.TryGetValue(code, out var n) ? n.English : code;
 
+    /// <summary>"Gemini" or "Groq" when that cloud engine is chosen and has a key, otherwise null (the local model translates).</summary>
+    public static string? CloudName(AppConfig c)
+    {
+        var engine = c.Listen.TranslateEngine;
+        if (string.Equals(engine, "Gemini", StringComparison.OrdinalIgnoreCase) && c.Cloud.GeminiApiKey.Trim().Length > 0)
+            return "Gemini";
+        if (string.Equals(engine, "Groq", StringComparison.OrdinalIgnoreCase) && c.Cloud.GroqApiKey.Trim().Length > 0)
+            return "Groq";
+        return null;
+    }
+
     /// <summary>The translation of <paramref name="text"/>, or null if the answer was unusable.</summary>
     /// <param name="context">The transcript just before the text, to understand it; not translated.</param>
     public async Task<string?> TranslateAsync(string text, string language, string context, CancellationToken ct)
     {
-        var c = _config.Current.Listen;
+        var cfg = _config.Current;
+        var c = cfg.Listen;
         var schema = new
         {
             type = "object",
@@ -46,15 +62,25 @@ public sealed class Translator
         var system = c.TranslatePrompt.Replace("{language}", EnglishName(language));
         var user = context.Length == 0 ? text : $"Earlier text (context only):\n{context}\n\nTranslate:\n{text}";
 
-        // A cold start (loading the model) does not count towards the timeout
-        await _server.WarmUpAsync(ct);
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(c.TranslateTimeoutMs);
-
+        var cloud = CloudName(cfg);
+        var timeout = TimeSpan.FromMilliseconds(c.TranslateTimeoutMs);
         var sw = Stopwatch.StartNew();
-        var answer = await _server.ChatAsync([("system", system), ("user", user)], c.Temperature, text.Length * 3 + 200, schema, cts.Token);
+        string answer;
+        if (cloud == "Gemini")
+            answer = await GeminiClient.ChatJsonAsync(cfg.Cloud.GeminiApiKey.Trim(), cfg.Cloud.GeminiTextModel, system, user, c.Temperature, timeout, ct);
+        else if (cloud == "Groq")
+            answer = await GroqClient.ChatJsonAsync(cfg.Cloud.GroqApiKey.Trim(), cfg.Cloud.GroqTextModel, system, user, c.Temperature, timeout, ct);
+        else
+        {
+            // A cold start (loading the model) does not count towards the timeout
+            await _server.WarmUpAsync(ct);
+            sw.Restart();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(timeout);
+            answer = await _server.ChatAsync([("system", system), ("user", user)], c.Temperature, text.Length * 3 + 200, schema, cts.Token);
+        }
         var translation = Parse(answer);
-        Log.Debug($"Translated into {language} in {sw.ElapsedMilliseconds} ms");
+        Log.Debug($"Translated into {language} in {sw.ElapsedMilliseconds} ms{(cloud != null ? $" ({cloud})" : "")}");
         return translation;
     }
 
