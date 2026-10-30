@@ -18,7 +18,7 @@
     <Description>Local push-to-talk dictation (whisper.cpp, Metal)</Description>
   </PropertyGroup>
 
-  <!-- Lite (-p:Edition=Lite, scripts/build-mac.sh --lite): no whisper-server, llama-server or sherpa-onnx; speech is
+  <!-- Lite (-p:Edition=Lite, or the lite option of scripts/build-mac.sh): no whisper-server, llama-server or sherpa-onnx; speech is
        recognised with Gemini or Groq (see AppEdition) -->
   <PropertyGroup Condition="'$(Edition)' == 'Lite'">
     <DefineConstants>$(DefineConstants);LITE</DefineConstants>
