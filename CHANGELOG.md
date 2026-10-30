@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- The grammar check can use Gemini or Groq: its **Model** (Speech to Text → Post-processing) lists their text models
+  once a key is added (`Polish.Engine`); the text of each dictation is then sent there, and no local model is needed.
+  Home shows what checks.
+- Settings changed in the window apply and show at once (before, a dependent control could take a few seconds to
+  update).
+- **Lite edition**: every release also has WhisperLocal Lite, a much smaller download without local models
+  (`…-arm64-lite.dmg`, `WhisperLocal-windows-x64-lite.zip`). It recognises and translates only with Gemini or Groq
+  (whichever key is added) and shows only what it can do: Models has just the cloud keys, the model lists only the
+  cloud models; no autocomplete or speaker separation (the grammar check uses the cloud). Home → Updates has a button per edition:
+  **Update** this one, **Install** the other (a switch, in any version; settings and keys stay).
+- Listening: **Speech model** on Notes & Translate chooses what recognises the speech: the local model from Speech to
+  Text (as before, the default) or, with a key, Gemini or Whisper on Groq (`Listen.RecognitionEngine`). With the
+  cloud, each line's audio is sent there and a line shows when it is finished; speakers are still told apart on the Mac.
+- Listening: **Include me** and telling the speakers apart can be switched while listening, with the **Me**
+  (microphone) and **Speakers** buttons next to the panel's language menu; the microphone starts or stops at once,
+  speakers told apart so far keep their numbers, and the choice is remembered for the next time.
+- Models → Cloud warns, under the box for pasting a Gemini or Groq API key, that the key is saved unencrypted, as
+  plain text, in `config.json`, so anyone who can read that file can use it.
 - Fix (macOS): dictation was pasted twice in Chrome. The paste is now a full Command press (Command down, V,
   Command up), the way a keyboard sends it, instead of a lone V carrying the Command flag.
 - Listening: speakers are short labels in front of each line, **[Me]**, **[1]**, **[2]**, … (**[Them]** when not told

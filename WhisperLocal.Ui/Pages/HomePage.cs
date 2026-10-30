@@ -44,15 +44,28 @@ internal sealed class HomePage : Page
         });
     }
 
+    /// <summary>
+    /// The version and edition, and one button per edition: this one's updates, and installing the other (Full has
+    /// the local models, Lite only the cloud ones and a much smaller download).
+    /// </summary>
     private Control UpdatesSection()
     {
-        var version = DarkTheme.Label($"WhisperLocal {_host.VersionText}", 13);
+        var version = DarkTheme.Label($"WhisperLocal {_host.VersionText} {AppEdition.Name}", 13);
         version.Margin = new Thickness(0, 0, 16, 0);
-        var row = Widgets.Buttons(
-            DarkTheme.Button("Check for Updates", _host.CheckForUpdates, small: true),
-            DarkTheme.Button("GitHub", () => _host.OpenPath(RepositoryUrl), small: true));
+        var full = DarkTheme.Button(AppEdition.IsLite ? "Install Full" : "Update Full", () => _host.CheckForUpdates(lite: false), small: true);
+        ToolTip.SetTip(full, AppEdition.IsLite
+            ? "Switch to Full: recognition on this computer, autocomplete and the grammar check with local models; a larger download"
+            : "Look for a newer version of Full, this edition");
+        var lite = DarkTheme.Button(AppEdition.IsLite ? "Update Lite" : "Install Lite", () => _host.CheckForUpdates(lite: true), small: true);
+        ToolTip.SetTip(lite, AppEdition.IsLite
+            ? "Look for a newer version of Lite, this edition"
+            : "Switch to Lite: a much smaller app that recognises and translates only with Gemini or Groq (needs a key)");
+        var row = Widgets.Buttons(full, lite, DarkTheme.Button("GitHub", () => _host.OpenPath(RepositoryUrl), small: true));
         row.Children.Insert(0, version);
-        return row;
+        var about = DarkTheme.MutedLabel("Full runs the speech and language models on this computer; Lite is smaller and uses only " +
+                                         "Gemini or Groq. Either can be installed over the other; settings and keys stay.", 11);
+        about.TextWrapping = TextWrapping.Wrap;
+        return new StackPanel { Spacing = 6, Children = { row, about } };
     }
 
     private Control FilesSection()

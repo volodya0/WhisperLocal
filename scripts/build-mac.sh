@@ -10,6 +10,8 @@
 #   scripts/build-mac.sh                  # → artifacts/WhisperLocal.app
 #   scripts/build-mac.sh --install        # also copies it to ~/Applications
 #   scripts/build-mac.sh --dmg            # also packs it into artifacts/WhisperLocal-<arch>.dmg (drag to Applications)
+#   scripts/build-mac.sh --lite --dmg     # Lite: no whisper-server, llama-server or speaker separation (Gemini or Groq
+#                                         # recognise); the DMG is WhisperLocal-<version>-<arch>-lite.dmg
 #   WHISPER_CPP_TAG=v1.9.5 scripts/build-mac.sh --rebuild-whisper
 #   LLAMA_CPP_TAG=b11940 scripts/build-mac.sh --rebuild-llama
 #
@@ -31,12 +33,14 @@ INSTALL=0
 DMG=0
 REBUILD_WHISPER=0
 REBUILD_LLAMA=0
+LITE=0
 for arg in "$@"; do
     case "$arg" in
         --install) INSTALL=1 ;;
         --dmg) DMG=1 ;;
         --rebuild-whisper) REBUILD_WHISPER=1 ;;
         --rebuild-llama) REBUILD_LLAMA=1 ;;
+        --lite) LITE=1 ;;
         *) echo "Unknown option: $arg" >&2; exit 2 ;;
     esac
 done
@@ -52,6 +56,9 @@ need() {
 }
 need dotnet "Install the .NET 8 SDK: https://dotnet.microsoft.com/download/dotnet/8.0 (or: brew install --cask dotnet-sdk@8)"
 
+if [[ $LITE == 1 ]]; then
+echo "==> Lite: no whisper-server or llama-server"
+else
 # 1. whisper-server (Metal is on by default on macOS; static so the binary is self-contained)
 if [[ $REBUILD_WHISPER == 1 || ! -x "$RUNTIME/whisper-server" ]]; then
     need git "Install the Xcode Command Line Tools: xcode-select --install"
@@ -101,6 +108,7 @@ if [[ $REBUILD_LLAMA == 1 || ! -x "$LLAMA_RUNTIME/llama-server" || "$(cat "$LLAM
 else
     echo "==> Using cached llama-server ($LLAMA_CPP_TAG); --rebuild-llama to rebuild"
 fi
+fi
 
 # 2. .NET app
 if [[ -z "${UPDATE_REPOSITORY:-}" ]]; then
@@ -109,10 +117,13 @@ if [[ -z "${UPDATE_REPOSITORY:-}" ]]; then
         | sed -nE 's#^(git@github\.com:|https://github\.com/)([^/]+/[^/]+)$#\2#p' | sed -E 's/\.git$//')"
 fi
 PUBLISH_ARGS=(-p:DebugType=none "-p:UpdateRepository=${UPDATE_REPOSITORY:-}")
+if [[ $LITE == 1 ]]; then
+    PUBLISH_ARGS+=(-p:Edition=Lite)
+fi
 if [[ -n "${VERSION:-}" ]]; then
     PUBLISH_ARGS+=("-p:Version=$VERSION")
 fi
-echo "==> Publishing WhisperLocal.Mac ($RID, version ${VERSION:-from project}, updates from ${UPDATE_REPOSITORY:-nowhere})"
+echo "==> Publishing WhisperLocal.Mac ($RID, $(if [[ $LITE == 1 ]]; then echo Lite; else echo Full; fi), version ${VERSION:-from project}, updates from ${UPDATE_REPOSITORY:-nowhere})"
 rm -rf "$WORK/publish"
 dotnet publish "$REPO/WhisperLocal.Mac/WhisperLocal.Mac.csproj" -c Release -r "$RID" --self-contained true \
     "${PUBLISH_ARGS[@]}" -o "$WORK/publish"
@@ -127,7 +138,10 @@ if [[ -n "${VERSION:-}" ]]; then
 fi
 cp "$REPO/WhisperLocal.Mac/Resources/AppIcon.icns" "$APP/Contents/Resources/"
 cp -R "$WORK/publish/." "$APP/Contents/MacOS/"
-chmod +x "$APP/Contents/MacOS/WhisperLocal" "$APP/Contents/MacOS/whisper/whisper-server" "$APP/Contents/MacOS/llama/llama-server"
+chmod +x "$APP/Contents/MacOS/WhisperLocal"
+if [[ $LITE == 0 ]]; then
+    chmod +x "$APP/Contents/MacOS/whisper/whisper-server" "$APP/Contents/MacOS/llama/llama-server"
+fi
 
 # Ad-hoc signatures change with every build, and macOS then forgets the Accessibility permission.
 # Signing with a stable identity (e.g. a self-signed "Code Signing" certificate from Keychain Access) avoids that.
@@ -150,7 +164,12 @@ fi
 
 if [[ $DMG == 1 ]]; then
     VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")"
-    DMG_PATH="$REPO/artifacts/WhisperLocal-$VERSION-${RID#osx-}.dmg"
+    # Lite ends in -lite.dmg, so the Full app's update check (which looks for -<arch>.dmg) never picks it
+    EDITION_SUFFIX=""
+    if [[ $LITE == 1 ]]; then
+        EDITION_SUFFIX="-lite"
+    fi
+    DMG_PATH="$REPO/artifacts/WhisperLocal-$VERSION-${RID#osx-}$EDITION_SUFFIX.dmg"
     STAGING="$WORK/dmg"
     echo "==> Creating $DMG_PATH"
     rm -rf "$STAGING" "$DMG_PATH"

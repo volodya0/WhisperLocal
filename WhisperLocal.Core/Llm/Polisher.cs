@@ -1,12 +1,17 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using WhisperLocal.Cloud;
 using WhisperLocal.Config;
+using WhisperLocal.Stt;
 using WhisperLocal.Text;
 
 namespace WhisperLocal.Llm;
 
-/// <summary>Grammar check: the local LLM rewrites a finished dictation as correct, natural text in the same language.</summary>
+/// <summary>
+/// Grammar check: a language model rewrites a finished dictation as correct, natural text in the same language; the
+/// local one, or Gemini or Groq (Polish.Engine) with the user's key.
+/// </summary>
 public sealed class Polisher
 {
     private readonly ConfigManager _config;
@@ -18,10 +23,33 @@ public sealed class Polisher
         _server = server;
     }
 
+    /// <summary>
+    /// "Gemini" or "Groq" when that cloud engine is chosen and has a key (in Lite, which has no local model: any key),
+    /// otherwise null (the local model checks).
+    /// </summary>
+    public static string? CloudName(AppConfig c)
+    {
+        var engine = c.Polish.Engine;
+        if (string.Equals(engine, "Gemini", StringComparison.OrdinalIgnoreCase) && c.Cloud.GeminiApiKey.Trim().Length > 0)
+            return "Gemini";
+        if (string.Equals(engine, "Groq", StringComparison.OrdinalIgnoreCase) && c.Cloud.GroqApiKey.Trim().Length > 0)
+            return "Groq";
+        return AppEdition.IsLite ? RecognitionRouter.AnyCloud(c) : null;
+    }
+
+    /// <summary>What checks, for the status: like <see cref="Translator.Description"/>.</summary>
+    public static string Description(AppConfig c) => CloudName(c) switch
+    {
+        "Groq" => $"{c.Cloud.GroqTextModel} · Groq cloud",
+        "Gemini" => $"{c.Cloud.GeminiTextModel} · Google cloud",
+        _ => $"{LlmModels.Find(c.LocalLlm.ModelPath)?.Title ?? Path.GetFileName(c.LocalLlm.ModelPath)} · on this computer",
+    };
+
     /// <summary>The polished text, or null if the model found nothing to improve (or its answer was unusable).</summary>
     public async Task<string?> PolishAsync(string text, CancellationToken ct)
     {
-        var c = _config.Current.Polish;
+        var cfg = _config.Current;
+        var c = cfg.Polish;
         if (TextFilters.CountWords(text) < c.MinWords)
             return null;
 
@@ -32,16 +60,26 @@ public sealed class Polisher
             required = new[] { "text" },
         };
 
-        // A cold start (loading the model) does not count towards the timeout
-        await _server.WarmUpAsync(ct);
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(c.TimeoutMs);
-
+        var cloud = CloudName(cfg);
+        var timeout = TimeSpan.FromMilliseconds(c.TimeoutMs);
         var sw = Stopwatch.StartNew();
-        var answer = await _server.ChatAsync([("system", c.SystemPrompt), ("user", text)], c.Temperature,
-            text.Length + 200, schema, cts.Token);
+        string answer;
+        if (cloud == "Gemini")
+            answer = await GeminiClient.ChatJsonAsync(cfg.Cloud.GeminiApiKey.Trim(), cfg.Cloud.GeminiTextModel, c.SystemPrompt, text, c.Temperature, timeout, ct);
+        else if (cloud == "Groq")
+            answer = await GroqClient.ChatJsonAsync(cfg.Cloud.GroqApiKey.Trim(), cfg.Cloud.GroqTextModel, c.SystemPrompt, text, c.Temperature, timeout, ct);
+        else
+        {
+            // A cold start (loading the model) does not count towards the timeout
+            await _server.WarmUpAsync(ct);
+            sw.Restart();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(timeout);
+            answer = await _server.ChatAsync([("system", c.SystemPrompt), ("user", text)], c.Temperature,
+                text.Length + 200, schema, cts.Token);
+        }
         var polished = Parse(answer, text);
-        Log.Info($"Grammar check in {sw.ElapsedMilliseconds} ms: {(polished == null ? "no changes" : "proposed")}");
+        Log.Info($"Grammar check in {sw.ElapsedMilliseconds} ms{(cloud != null ? $" ({cloud})" : "")}: {(polished == null ? "no changes" : "proposed")}");
         if (polished != null && _config.Current.Logging.LogText)
             Log.Info($"  polished: {polished}");
         return polished;

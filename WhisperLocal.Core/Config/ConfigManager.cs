@@ -18,6 +18,8 @@ public sealed class ConfigManager : IDisposable
 
     private readonly FileSystemWatcher? _watcher;
     private readonly System.Threading.Timer _debounce;
+    private string? _loadedText; // the file as last loaded: an unchanged file is not applied again
+    private readonly object _reloading = new(); // ReloadNow (UI thread) and the watcher's timer
 
     public string FilePath { get; }
     public AppConfig Current { get; private set; }
@@ -55,14 +57,32 @@ public sealed class ConfigManager : IDisposable
             Log.Info($"Default config written to {FilePath}");
             return defaults;
         }
-        return Parse(ReadWithRetry());
+        _loadedText = ReadWithRetry();
+        return Parse(_loadedText);
+    }
+
+    /// <summary>
+    /// Reads the file now instead of waiting for the watcher (which lags, and is debounced): a setting saved from the
+    /// window applies, and shows, at once. The watcher's reload that follows finds the file unchanged and does nothing.
+    /// </summary>
+    public void ReloadNow()
+    {
+        _debounce.Change(Timeout.Infinite, Timeout.Infinite);
+        Reload();
     }
 
     private void Reload()
     {
         try
         {
-            Current = Parse(ReadWithRetry());
+            lock (_reloading)
+            {
+                var text = ReadWithRetry();
+                if (text == _loadedText)
+                    return;
+                Current = Parse(text);
+                _loadedText = text;
+            }
             Log.Info("Config reloaded");
             Changed?.Invoke();
         }

@@ -11,22 +11,23 @@ namespace WhisperLocal.Updates;
 /// </summary>
 internal static class Updater
 {
-    private const string AssetSuffix = "-windows-x64.zip";
 
     public static string? Repository => GitHubReleases.Repository;
 
     public static string CurrentVersionText => GitHubReleases.CurrentVersionText;
 
-    /// <summary>The newest release with a Windows zip, or null if none is published.</summary>
-    public static Task<Release?> GetLatestAsync(CancellationToken ct) => GitHubReleases.GetLatestAsync(AssetSuffix, ct);
+    /// <summary>The newest release with a Windows zip of that edition ("-windows-x64.zip", Lite "-windows-x64-lite.zip"), or null if none is published.</summary>
+    public static Task<Release?> GetLatestAsync(bool lite, CancellationToken ct) =>
+        GitHubReleases.GetLatestAsync(lite ? "-windows-x64-lite.zip" : "-windows-x64.zip", ct);
 
     public static bool IsNewer(Release release) => GitHubReleases.IsNewer(release);
 
     /// <summary>
     /// Downloads and unpacks <paramref name="release"/>, then starts a helper that copies it over the app folder once
-    /// this process has exited and starts the new version. The caller quits the app right after.
+    /// this process has exited and starts the new version. The caller quits the app right after. Going to Lite removes
+    /// the whisper.cpp runtime it does not use (the models in models\ stay, for going back to Full).
     /// </summary>
-    public static async Task InstallAsync(Release release, Action<string> status, CancellationToken ct)
+    public static async Task InstallAsync(Release release, bool lite, Action<string> status, CancellationToken ct)
     {
         var appDir = AppPaths.AppDir;
         var exe = Environment.ProcessPath ?? Path.Combine(appDir, "WhisperLocal.exe");
@@ -47,6 +48,7 @@ internal static class Updater
                 throw new InvalidDataException("The update does not contain WhisperLocal.exe.");
 
             // config.json holds the user's settings; the defaults in the zip must not replace it
+            var cleanup = lite ? $"rmdir /s /q \"{Path.Combine(appDir, "whisper")}\" 2>nul" : "";
             var script = Path.Combine(Path.GetTempPath(), $"whisperlocal-update-{Guid.NewGuid():N}.cmd");
             File.WriteAllText(script,
                 $"""
@@ -54,6 +56,7 @@ internal static class Updater
                 :wait
                 tasklist /FI "PID eq {Environment.ProcessId}" 2>nul | find "{Environment.ProcessId}" >nul && (timeout /t 1 /nobreak >nul & goto wait)
                 robocopy "{unpacked}" "{appDir}" /E /XF config.json /R:10 /W:1 /NFL /NDL /NJH /NJS /NP >nul
+                {cleanup}
                 start "" "{exe}"
                 rmdir /s /q "{work}"
                 (goto) 2>nul & del "%~f0"

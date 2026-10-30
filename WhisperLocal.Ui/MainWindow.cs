@@ -75,6 +75,12 @@ public sealed class MainWindow : Window
         // window in its constructor), so asking it for the setup items would crash; the page refreshes when shown
         Highlight(_home);
         _refresh.Tick += (_, _) => Refresh();
+        // A setting changed (from a page, or the file edited by hand): the pages show it at once, not on the next tick
+        _host.Config.Changed += () => Dispatcher.UIThread.Post(() =>
+        {
+            if (IsVisible)
+                Refresh();
+        });
 
         Closing += (_, e) =>
         {
@@ -203,7 +209,8 @@ public sealed class MainWindow : Window
                 Spacing = 10,
                 Children =
                 {
-                    new PathIcon { Data = Geometry.Parse(icon), Width = 15, Height = 15 },
+                    // Centered on the text's line (left alone, it sits at the top of the taller line)
+                    new PathIcon { Data = Geometry.Parse(icon), Width = 15, Height = 15, VerticalAlignment = VerticalAlignment.Center },
                     new TextBlock { Text = page.Title, FontSize = 13, VerticalAlignment = VerticalAlignment.Center },
                 },
             },

@@ -1,3 +1,31 @@
+#if LITE
+using WhisperLocal.Config;
+using WhisperLocal.Pipeline;
+
+namespace WhisperLocal.Mac.Audio;
+
+/// <summary>Lite has no sherpa-onnx: speakers are not told apart (the others are all "Them").</summary>
+internal sealed class Voiceprints : IVoiceprints, IDisposable
+{
+    public Voiceprints(ConfigManager config)
+    {
+    }
+
+    public bool IsAvailable => false;
+
+    public bool IsLoaded => false;
+
+    public float[]? Compute(byte[] pcm) => null;
+
+    public void Unload()
+    {
+    }
+
+    public void Dispose()
+    {
+    }
+}
+#else
 using SherpaOnnx;
 using WhisperLocal.Audio;
 using WhisperLocal.Config;
@@ -79,3 +107,4 @@ internal sealed class Voiceprints(ConfigManager config) : IVoiceprints, IDisposa
         }
     }
 }
+#endif

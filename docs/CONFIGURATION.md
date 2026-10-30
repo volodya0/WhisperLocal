@@ -89,6 +89,7 @@ CPU; `-ng` runs on the CPU only.
 | Setting | Meaning |
 |---|---|
 | `Polish.Enabled` | Propose a corrected version after each dictation (the checkbox in Speech to Text → Post-processing). |
+| `Polish.Engine` | What checks: `"Local"` (the `LocalLlm` model, the default), `"Gemini"` (`Cloud.GeminiTextModel`) or `"Groq"` (`Cloud.GroqTextModel`, the same text models translation uses); the dictated text is then sent there. Without that provider's key, the local model checks. Chosen with the grammar check's Model in Speech to Text. |
 | `Polish.MinWords` | Shorter dictations are not checked. |
 | `Polish.DisplaySeconds` | How long the proposal stays (longer while the mouse is over it). |
 | `LocalLlm.ModelPath` | The GGUF model, for the grammar check and translation (chosen in Speech to Text or Notes & Translate, downloaded on the Models page; any instruction-tuned GGUF works). |
@@ -102,8 +103,9 @@ CPU; `-ng` runs on the CPU only.
 | `Listen.Language` | Language of what is heard: `"auto"` detects it per segment, a code (`"en"`) fixes it. |
 | `Listen.TranslateTo` | Translate into this language (`"uk"`, `"en"`, …), `""` for the original only. Set from the indicator's menu. |
 | `Listen.TranslateEngine` | What translates: `"Local"` (the `LocalLlm` model, the default), `"Gemini"` (`Cloud.GeminiTextModel`) or `"Groq"` (`Cloud.GroqTextModel`); the text of each line is then sent there. Without that provider's key, the local model translates. Chosen with Notes & Translate → Translation model. |
-| `Listen.IncludeMe` | Also write down what is said into the microphone (`Audio.DeviceName`), as "Me", recognised in `Whisper.Language` (default `true`). An echo of the speakers is left out. |
-| `Listen.SeparateSpeakers` | Tell the voices of what the Mac plays apart ([1], [2], …) with the voice model, cutting a line where another speaker starts (default `true`; needs `Listen.VoiceModelPath` downloaded). Off: everyone is "Them". |
+| `Listen.RecognitionEngine` | What recognises the speech: `"Local"` (the `Whisper.ModelPath` model on this Mac, the default), `"Gemini"` (`Cloud.GeminiModel`) or `"Groq"` (`Cloud.GroqModel`, the same models dictation uses in that cloud); each line's audio is then sent there, and no text shows while a sentence is spoken. Without that provider's key, it recognises locally; `Recognition.FallbackToLocal` applies. Chosen with Notes & Translate → Speech model. |
+| `Listen.IncludeMe` | Also write down what is said into the microphone (`Audio.DeviceName`), as "Me", recognised in `Whisper.Language` (default `true`). An echo of the speakers is left out. Also switched with the indicator's Me button while listening. |
+| `Listen.SeparateSpeakers` | Tell the voices of what the Mac plays apart ([1], [2], …) with the voice model, cutting a line where another speaker starts (default `true`; needs `Listen.VoiceModelPath` downloaded). Off: everyone is "Them". Also switched with the indicator's Speakers button while listening. |
 | `Listen.VoiceModelPath` | The voice model (speaker embeddings, ONNX) for `Listen.SeparateSpeakers`, relative to the data folder; default `models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx` (CAM++, downloaded on the Models page). |
 | `Listen.SpeakerThreshold` | How alike two voices must sound (cosine similarity, 0–1) to be the same speaker, and below which a line is cut (default `0.6`). Higher tells similar voices apart but may split one person in two. |
 | `Listen.Languages` | The languages the indicator's menu offers. |
@@ -113,8 +115,8 @@ CPU; `-ng` runs on the CPU only.
 | `Listen.TranslateTimeoutMs`, `Listen.Temperature`, `Listen.TranslatePrompt` | How the language model translates (`{language}` in the prompt is the language name). |
 
 Each session is a note in the notes folder (`Notes.Folder`, `Notes.Extension`), so the Notes page lists it.
-Translation uses the `LocalLlm` model (the one the grammar check uses), or Gemini or Groq (`Listen.TranslateEngine`). Listening always recognises with local
-Whisper, whatever `Recognition.Engine` says. The shortcut and the languages are on the Notes & Translate page.
+Translation uses the `LocalLlm` model (the one the grammar check uses), or Gemini or Groq (`Listen.TranslateEngine`). Recognition is local Whisper
+unless `Listen.RecognitionEngine` is Gemini or Groq, whatever `Recognition.Engine` (dictation) says. The shortcut and the languages are on the Notes & Translate page.
 
 ## LLM cleanup through Ollama (optional)
 

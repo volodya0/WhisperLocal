@@ -8,6 +8,12 @@ Tuned for Ukrainian with English terms, and works for English too.
 
 ## Install
 
+Each release has two editions. **Full** runs the speech and language models on your computer (nothing has to leave
+it). **Lite** is a much smaller download without local models: it recognises and translates only with Gemini or Groq,
+so it needs a free key from either, and has no autocomplete or speaker separation (its grammar check uses the cloud too). Lite's files end in
+`-lite` (`WhisperLocal-<version>-arm64-lite.dmg`, `WhisperLocal-windows-x64-lite.zip`). Either can later be switched
+to the other from Home (**Install Full** / **Install Lite**); settings and keys stay.
+
 ### macOS (Apple Silicon, macOS 12 or later)
 
 1. Download the latest `.dmg` from [Releases](https://github.com/volodya0/WhisperLocal/releases/latest).
@@ -62,8 +68,10 @@ On Windows, double-click the tray icon.
 The sidebar on the left has the pages, with the settings below them and the status (Ready, or what needs
 attention) at the bottom.
 
-- **Home** — the status with the setup checklist, **Check for Updates**, and buttons that open the config file, the
-  log or the data folder.
+- **Home** — the status with the setup checklist; **Updates**, with the version and edition, a button to update this
+  edition and one to install the other (**Update Full** and **Install Lite**, or **Update Lite** and **Install Full**);
+  and buttons that open the config file, the log or the data folder. In Lite, the pages show only what Lite can do:
+  Models has just the cloud keys, and the model lists only the cloud models.
 - **History** — statistics (dictations, words, speaking time, words per minute) for today, 7 days, 30 days or all
   time, and every kept dictation grouped by day.
 - **Notes** — the text files in your notes folder, newest first. **New Note** creates one and opens it in your text
@@ -92,7 +100,8 @@ attention) at the bottom.
   and after how long without use they unload by themselves (5 minutes by default); the folder the models are
   downloaded to; and **Cloud**, where
   you can paste a Google Gemini API key (free from Google AI Studio, **Get a Key**) or a Groq API key (free from the
-  Groq console) and **Test** it; that provider's models then appear in Speech to Text → Model and, on macOS, in Notes &
+  Groq console) and **Test** it (the key is saved unencrypted, as plain text, in `config.json`, so anyone who can read
+  that file can use it); that provider's models then appear in Speech to Text → Model and, on macOS, in Notes &
   Translate → Translation model. **Usage** opens the provider's page with the requests and limits you have used. Under each connected provider,
   a line shows what WhisperLocal itself sent today (recordings, translations, tokens), the last minute, how much of
   Groq's limits is left, and a limit reached recently; it turns orange when the provider is near its limit, and then
@@ -105,7 +114,9 @@ Everything else (start at login, which microphone, English terms that get mishea
 
 Turn it on in Speech to Text → Post-processing and download its model on the Models page (Gemma 3 4B, 2.5 GB, is the default). After each dictation, a
 small panel proposes a corrected version with the changed words in green. Its buttons replace what was pasted with
-the corrected text or copy it; or just ignore it — it goes away by itself. It runs locally too.
+the corrected text or copy it; or just ignore it — it goes away by itself. It runs locally too, unless you choose
+Gemini or Groq as its **Model** (once a key is added on Models): then the text of each dictation is sent there to be
+checked, with no model to download.
 
 ## Notes from what the Mac plays (macOS 14.2 or later)
 
@@ -129,14 +140,17 @@ left out (headphones work best when you talk over the others). With **Tell the o
 the 28 MB voice model is downloaded on the **Models** page), the voices the Mac plays become **[1]**, **[2]**, …,
 each in its own color, and a line is cut where another speaker starts; it works for any language. It compares how the
 voices sound, so two similar voices or people talking over each other can get mixed up. Off, everyone the Mac plays
-is **[Them]**. Both checkboxes are on the **Notes & Translate** page.
+is **[Them]**. Both checkboxes are on the **Notes & Translate** page, and both can be switched while listening with
+the panel's **Me** (microphone) and **Speakers** buttons, next to its language menu; the choice is remembered.
 
 The panel stays until you click its **stop** button (pressing the shortcut again only brings it back); the folder
 button opens the note. Each session is a note in your notes folder, so it is on the **Notes** page, laid out like
 the panel: the time, who spoke and the text, with the translation beside it. A Markdown note is a table (columns in
 Obsidian, Typora, VS Code or GitHub); a plain text note has columns that line up in a monospaced font. The shortcut,
-the language that is heard and the translation language are on the **Notes & Translate** page. Listening always
-recognises on this Mac, even when dictation uses a cloud model.
+the language that is heard and the translation language are on the **Notes & Translate** page. Its **Speech model**
+is the local model from Speech to Text (the default: nothing leaves the Mac) or, once a key is added on the **Models**
+page, Gemini or Whisper on Groq: each line's audio is then sent there, and a line shows when it is finished (no
+greyed text while a sentence is spoken, to stay within the free limits).
 
 ## Menu
 
@@ -171,9 +185,9 @@ Unless you choose a cloud model (Gemini or Groq), audio and text never leave you
 is downloading models from HuggingFace and, when you ask for it, checking GitHub for updates and checking a Gemini or
 Groq API key with Google or Groq.
 With Gemini as the recognition engine, each recording is sent to Google's Gemini API; on the free tier Google may use
-it to improve its products (see Google's terms). With Groq, each recording is sent to Groq's API (see Groq's terms). Recordings are not saved (listening keeps only the text, in its note). Listening always
-recognises locally, even with a cloud model, and tells voices apart on this Mac too; with Gemini or Groq as the translation model, the text of each line is
-sent there to be translated. The log and the dictation history keep
+it to improve its products (see Google's terms). With Groq, each recording is sent to Groq's API (see Groq's terms). Recordings are not saved (listening keeps only the text, in its note). Listening
+recognises on this Mac unless its own Speech model is Gemini or Groq (then each line's audio is sent there), and tells voices apart on this Mac
+either way; with Gemini or Groq as the translation model, the text of each line is sent there to be translated. The log and the dictation history keep
 the text of your dictations to help with troubleshooting; set `Logging.LogText` to `false` in the config to stop
 that.
 

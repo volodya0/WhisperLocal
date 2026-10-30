@@ -60,6 +60,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `BatchRunner.cs` | `--batch <folder>` mode: runs recorded audio files through the pipeline and writes CSV/TXT reports, for comparing settings and models. |
 | `Audio/AudioConvert.cs` | PCM conversions to the format Whisper wants (16 kHz mono 16-bit), WAV header, silence/level checks. |
 | `Config/AppConfig.cs` | The whole `config.json` as classes: `Hotkey`, `Audio`, `Whisper`, `Memory`, `Filter`, `Llm`, `LocalLlm`, `Autocomplete` (shelved), `Polish`, `Insert`, `Ui`, `Logging`. |
+| `Config/AppEdition.cs` | Full or Lite (`-p:Edition=Lite`): Lite has no local models and recognises and translates with Gemini or Groq. |
 | `Config/AppPaths.cs` | Where things live: next to the exe on Windows; `~/Library/Application Support/WhisperLocal` for config, logs and models on macOS. |
 | `Config/ConfigManager.cs` | Loads `config.json` (with `//` comments), writes defaults on first run, hot-reloads on change and raises `Changed`. |
 | `Config/ConfigEditor.cs` | Changes single values in `config.json` in place, keeping comments and formatting (used by the main window). |
@@ -93,7 +94,7 @@ Both platform apps produce an assembly named `WhisperLocal`, so Core's `internal
 | `Stt/ModelNotFoundException.cs` | "Model missing" error whose message explains how to get it. |
 | `Text/TextFilters.cs` | Removes typical Whisper hallucinations and applies the regex dictionary from the config. |
 | `Text/TextDiff.cs` | Word-level diff, to highlight what the grammar check changed. |
-| `Updates/GitHubReleases.cs` | "Check for Updates", shared part: the latest GitHub release, version comparison, download with checksum check. |
+| `Updates/GitHubReleases.cs` | "Check for Updates", shared part: the latest GitHub release of an edition, version comparison (or an edition switch), download with checksum check. |
 
 ### `WhisperLocal.Ui` — shared windows (Avalonia)
 

@@ -91,7 +91,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         [
             openItem,
             _transcriptItem,
-            new ToolStripMenuItem("Check for Updates…", null, (_, _) => CheckForUpdates()),
+            new ToolStripMenuItem("Check for Updates…", null, (_, _) => CheckForUpdates(AppEdition.IsLite)),
             new ToolStripSeparator(),
             _enabledItem,
             _unloadItem,
@@ -125,11 +125,11 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
 
         ApplyConfig();
         UpdateTrayState();
-        Log.Info($"WhisperLocal {Updater.CurrentVersionText} (Windows) started, config: {_config.FilePath}");
+        Log.Info($"WhisperLocal {Updater.CurrentVersionText} {AppEdition.Name} (Windows) started, config: {_config.FilePath}");
 
         if (_mainWindow.HasProblems)
             ShowMainWindow();
-        else if (config.Current.Whisper.StartOnLaunch && !RecognitionRouter.UsesCloud(config.Current))
+        else if (config.Current.Whisper.StartOnLaunch && !AppEdition.IsLite && !RecognitionRouter.UsesCloud(config.Current))
             _ = WarmUpWhisperAsync();
     }
 
@@ -161,22 +161,41 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
             ? new SetupItem(SetupState.Ok, "Microphone: " + microphone)
             : new SetupItem(SetupState.Error, "No microphone found", "Sound Settings", () => OpenPath("ms-settings:sound")));
 
-        var server = WhisperServerStt.ResolveServerExe(_config.Current.Whisper.ServerExe);
-        items.Add(File.Exists(server)
-            ? new SetupItem(SetupState.Ok, "Speech server: " + Path.GetFileName(server))
-            : new SetupItem(SetupState.Error, "Speech server not found: " + server));
-
-        var model = AppPaths.Resolve(_config.Current.Whisper.ModelPath);
-        var name = Path.GetFileName(model);
-        if (_download is { } download)
-            items.Add(new SetupItem(SetupState.Pending, download.Text, "Cancel", () => download.Cancel.Cancel()));
-        else if (File.Exists(model))
-            items.Add(new SetupItem(SetupState.Ok, $"Model: {name} ({FormatSize(new FileInfo(model).Length)})",
-                "Show Folder", () => OpenPath(Path.GetDirectoryName(model)!)));
+        // What recognises dictation: the provider and the model
+        var cfg = _config.Current;
+        if (AppEdition.IsLite)
+        {
+            // Lite has no speech server or local model: Gemini or Groq recognise
+            items.Add(RecognitionRouter.UsesCloud(cfg)
+                ? new SetupItem(SetupState.Ok, $"Recognition: {RecognitionRouter.Description(cfg)}")
+                : new SetupItem(SetupState.Error, "Add a Gemini or Groq key: Lite recognises speech in the cloud", "Add a Key", _mainWindow.ShowModels));
+        }
         else
-            // With a cloud engine the local model is only the fallback
-            items.Add(new SetupItem(RecognitionRouter.UsesCloud(_config.Current) ? SetupState.Warning : SetupState.Error,
-                $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
+        {
+            var cloud = RecognitionRouter.UsesCloud(cfg);
+            // Shown only when missing (a damaged install): when it is there, the recognition line says the setup is ready
+            var server = WhisperServerStt.ResolveServerExe(cfg.Whisper.ServerExe);
+            if (!File.Exists(server))
+                items.Add(new SetupItem(cloud ? SetupState.Warning : SetupState.Error, "Speech server not found: " + server));
+
+            var model = AppPaths.Resolve(cfg.Whisper.ModelPath);
+            var name = Path.GetFileName(model);
+            if (cloud)
+                items.Add(new SetupItem(SetupState.Ok, $"Recognition: {RecognitionRouter.Description(cfg)}"));
+            if (_download is { } download)
+                items.Add(new SetupItem(SetupState.Pending, download.Text, "Cancel", () => download.Cancel.Cancel()));
+            else if (cloud)
+            {
+                // With a cloud engine the local model is only the fallback
+                if (cfg.Recognition.FallbackToLocal && !File.Exists(model))
+                    items.Add(new SetupItem(SetupState.Warning, $"Fallback model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
+            }
+            else if (File.Exists(model))
+                items.Add(new SetupItem(SetupState.Ok, $"Recognition: {RecognitionRouter.Description(cfg)} ({FormatSize(new FileInfo(model).Length)})",
+                    "Show Folder", () => OpenPath(Path.GetDirectoryName(model)!)));
+            else
+                items.Add(new SetupItem(SetupState.Error, $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
+        }
 
         items.Add(new SetupItem(SetupState.Ok, $"Hotkey: hold {KeyboardHook.Describe(_config.Current.Hotkey.Key)} to dictate"));
         return items;
@@ -244,7 +263,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
             d.Cancel.Cancel();
     }
 
-    public void CheckForUpdates() => _ = CheckForUpdatesAsync();
+    public void CheckForUpdates(bool lite) => _ = CheckForUpdatesAsync(lite);
 
     public void OpenPath(string path, bool textEditor = false)
     {
@@ -326,7 +345,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
 
         // Do not let the user dictate for nothing: the main window has the Download button
         var modelPath = AppPaths.Resolve(cfg.Whisper.ModelPath);
-        if (!File.Exists(modelPath) && !RecognitionRouter.UsesCloud(cfg))
+        if (!AppEdition.IsLite && !File.Exists(modelPath) && !RecognitionRouter.UsesCloud(cfg))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
             ShowModelMissing(new ModelNotFoundException(modelPath));
@@ -538,8 +557,11 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         }
     }
 
-    /// <summary>Manual update check (never automatic): asks before downloading and installing.</summary>
-    private async Task CheckForUpdatesAsync()
+    /// <summary>
+    /// Manual update check (never automatic) of the Full or the Lite edition: asks before downloading and installing; the
+    /// other edition than this one is offered in any version (a switch).
+    /// </summary>
+    private async Task CheckForUpdatesAsync(bool lite)
     {
         if (_checkingForUpdates)
             return;
@@ -553,18 +575,23 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         _checkingForUpdates = true;
         try
         {
-            var release = await Updater.GetLatestAsync(CancellationToken.None);
-            if (release == null || !Updater.IsNewer(release))
+            var release = await Updater.GetLatestAsync(lite, CancellationToken.None);
+            if (release == null && lite != AppEdition.IsLite)
             {
-                MessageBox.Show($"WhisperLocal {Updater.CurrentVersionText} is the latest version.", "You're up to date",
+                MessageBox.Show($"No release has the {(lite ? "Lite" : "Full")} edition for Windows yet.", "Not published yet",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (release == null || !GitHubReleases.IsWorthInstalling(release, lite))
+            {
+                MessageBox.Show($"WhisperLocal {Updater.CurrentVersionText} {AppEdition.Name} is the latest version.", "You're up to date",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            var version = release.Version.ToString(3);
-            var notes = release.Notes.Length > 600 ? release.Notes[..600] + "…" : release.Notes;
-            if (MessageBox.Show($"You have {Updater.CurrentVersionText}.\n\n{notes}".TrimEnd() + "\n\nInstall it and restart WhisperLocal?",
-                    $"WhisperLocal {version} is available", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            var (title, message) = GitHubReleases.Describe(release, lite);
+            if (MessageBox.Show(message + "\n\nInstall it and restart WhisperLocal?", title, MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
             if (_state != State.Idle)
             {
@@ -573,9 +600,9 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
                 return;
             }
 
-            Log.Info($"Installing update {release.Tag}");
+            Log.Info($"Installing update {release.Tag} ({(lite ? "Lite" : "Full")})");
             // Download and unpacking take a while: keep the UI thread free
-            await Task.Run(() => Updater.InstallAsync(release, message => _ui.Post(_ => Notify(message, ToolTipIcon.Info), null),
+            await Task.Run(() => Updater.InstallAsync(release, lite, status => _ui.Post(_ => Notify(status, ToolTipIcon.Info), null),
                 CancellationToken.None));
             ExitApp();
         }

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using WhisperLocal.Cloud;
 using WhisperLocal.Config;
+using WhisperLocal.Stt;
 
 namespace WhisperLocal.Llm;
 
@@ -36,7 +37,10 @@ public sealed class Translator
 
     public static string EnglishName(string code) => Names.TryGetValue(code, out var n) ? n.English : code;
 
-    /// <summary>"Gemini" or "Groq" when that cloud engine is chosen and has a key, otherwise null (the local model translates).</summary>
+    /// <summary>
+    /// "Gemini" or "Groq" when that cloud engine is chosen and has a key (in Lite, which has no local model: any key),
+    /// otherwise null (the local model translates).
+    /// </summary>
     public static string? CloudName(AppConfig c)
     {
         var engine = c.Listen.TranslateEngine;
@@ -44,8 +48,16 @@ public sealed class Translator
             return "Gemini";
         if (string.Equals(engine, "Groq", StringComparison.OrdinalIgnoreCase) && c.Cloud.GroqApiKey.Trim().Length > 0)
             return "Groq";
-        return null;
+        return AppEdition.IsLite ? RecognitionRouter.AnyCloud(c) : null;
     }
+
+    /// <summary>What translates, for the status: "llama-3.3-70b-versatile · Groq cloud" or "Gemma 3 4B · on this computer".</summary>
+    public static string Description(AppConfig c) => CloudName(c) switch
+    {
+        "Groq" => $"{c.Cloud.GroqTextModel} · Groq cloud",
+        "Gemini" => $"{c.Cloud.GeminiTextModel} · Google cloud",
+        _ => $"{LlmModels.Find(c.LocalLlm.ModelPath)?.Title ?? Path.GetFileName(c.LocalLlm.ModelPath)} · on this computer",
+    };
 
     /// <summary>The translation of <paramref name="text"/>, or null if the answer was unusable.</summary>
     /// <param name="context">The transcript just before the text, to understand it; not translated.</param>
