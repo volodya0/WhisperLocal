@@ -45,7 +45,7 @@ internal sealed class SpeechPage : Page
     private List<HotkeyPreset> _hotkeyChoices = [];
     private List<(string Title, string Value)> _languageChoices = [];
     private List<ModelChoice> _modelChoices = [];
-    private List<string> _llmModelPaths = [];
+    private List<NotesSettingsPage.TranslationChoice> _llmChoices = [];
     private string? _shownHotkey;
     private string? _shownLanguage;
     private string? _shownModels;
@@ -75,13 +75,15 @@ internal sealed class SpeechPage : Page
         models.Margin = new Thickness(12, 0, 0, 0);
         Grid.SetColumn(models, 1);
         _modelProblemRow.Children.Add(models);
-        ToolTip.SetTip(_models, "The models ready to use: downloaded ones, and cloud ones once their key is added on the Models page");
+        ToolTip.SetTip(_models, AppEdition.IsLite
+            ? "The cloud models whose key is added on the Models page"
+            : "The models ready to use: downloaded ones, and cloud ones once their key is added on the Models page");
         Add(DarkTheme.Section("Recognition", new StackPanel
         {
             Spacing = 4,
             Children =
             {
-                Widgets.Fields(("Model", _models), ("Language", _languages)),
+                Widgets.Table(("Model", _models), ("Language", _languages)),
                 _modelProblemRow,
                 _fallback,
                 _cloudNote,
@@ -268,14 +270,14 @@ internal sealed class SpeechPage : Page
         public bool Cloud => Engine != "Local";
     }
 
-    /// <summary>A cloud provider's recognition models, and where its key and model are kept.</summary>
-    private sealed record CloudModels(string Engine, string Vendor, string ModelProperty, (string Title, string Id, string Hint)[] Models)
+    /// <summary>A cloud provider's recognition models, and where its key and model are kept (listening offers them too).</summary>
+    internal sealed record CloudModels(string Engine, string Vendor, string ModelProperty, (string Title, string Id, string Hint)[] Models)
     {
         public string Key(AppConfig c) => (Engine == "Groq" ? c.Cloud.GroqApiKey : c.Cloud.GeminiApiKey).Trim();
         public string Model(AppConfig c) => Engine == "Groq" ? c.Cloud.GroqModel : c.Cloud.GeminiModel;
     }
 
-    private static readonly CloudModels[] CloudProviders =
+    internal static readonly CloudModels[] CloudProviders =
     [
         new("Gemini", "Google", "GeminiModel",
         [
@@ -292,7 +294,9 @@ internal sealed class SpeechPage : Page
     private void RefreshModels(AppConfig cfg)
     {
         var cloud = RecognitionRouter.CloudName(cfg);
-        var wanted = CloudProviders.FirstOrDefault(p => RecognitionRouter.IsEngine(cfg, p.Engine));
+        // Lite has no local model: the cloud in use stands for the choice even when the config says "Local"
+        var wanted = CloudProviders.FirstOrDefault(p => RecognitionRouter.IsEngine(cfg, p.Engine))
+                     ?? (AppEdition.IsLite ? CloudProviders.FirstOrDefault(p => p.Engine == cloud) : null);
         var hasWantedKey = wanted != null && wanted.Key(cfg).Length > 0;
         var localPath = cfg.Whisper.ModelPath;
         var localReady = File.Exists(AppPaths.Resolve(localPath));
@@ -300,7 +304,7 @@ internal sealed class SpeechPage : Page
         var localName = local?.Title ?? Path.GetFileName(localPath);
 
         // Rebuilt when the choice or what is available changes (a download finishing, a key added)
-        var downloaded = WhisperModels.Catalog.Where(m => File.Exists(AppPaths.Resolve("models/" + m.File))).ToList();
+        var downloaded = WhisperModels.Catalog.Where(m => !AppEdition.IsLite && File.Exists(AppPaths.Resolve("models/" + m.File))).ToList();
         var signature = $"{cfg.Recognition.Engine}|{localPath}|{localReady}|{string.Join(",", downloaded.Select(m => m.File))}|" +
                         string.Join("|", CloudProviders.Select(p => $"{p.Model(cfg)}|{p.Key(cfg).Length > 0}"));
         if (signature != _shownModels)
@@ -309,7 +313,7 @@ internal sealed class SpeechPage : Page
             _modelChoices = downloaded
                 .Select(m => new ModelChoice($"{m.Title} · on this computer", "Local", "models/" + m.File, m.Hint))
                 .ToList();
-            if (local == null && localReady)
+            if (local == null && localReady && !AppEdition.IsLite)
                 _modelChoices.Add(new ModelChoice($"{localName} · on this computer", "Local", localPath, "Set in the config (Whisper.ModelPath)."));
             foreach (var p in CloudProviders.Where(p => p.Key(cfg).Length > 0))
                 _modelChoices.AddRange(p.Models.Select(m => new ModelChoice($"{m.Title} · {p.Vendor} cloud", p.Engine, m.Id, m.Hint)));
@@ -328,6 +332,12 @@ internal sealed class SpeechPage : Page
                         model, known.Hint ?? $"Set in the config (Cloud.{wanted.ModelProperty})."));
                     index = _modelChoices.Count - 1;
                 }
+            }
+            else if (AppEdition.IsLite)
+            {
+                // No key yet: nothing to choose
+                _modelChoices.Add(new ModelChoice("No cloud key yet", "None", "", "Add a Gemini or Groq key on the Models page."));
+                index = 0;
             }
             else
             {
@@ -352,12 +362,15 @@ internal sealed class SpeechPage : Page
         _fallback.Content = localReady
             ? $"If {cloud ?? "the cloud"} fails (no internet, limit used up), recognise on this computer with {localName}"
             : $"If {cloud ?? "the cloud"} fails (no internet, limit used up), recognise on this computer (no local model downloaded)";
-        _fallback.IsVisible = _cloudNote.IsVisible = cloud != null;
+        _fallback.IsVisible = cloud != null && !AppEdition.IsLite;
+        _cloudNote.IsVisible = cloud != null;
         _cloudNote.Text = $"Recordings are sent to {(cloud == "Groq" ? "Groq" : "Google")} for recognition.";
 
         // Checked every time: the line goes away when the download finishes or the key is added
         string? problem = null;
-        if (wanted != null && !hasWantedKey)
+        if (AppEdition.IsLite)
+            problem = cloud == null ? "WhisperLocal Lite recognises speech with Gemini or Groq: add a key on the Models page." : null;
+        else if (wanted != null && !hasWantedKey)
             problem = $"{wanted.Engine} needs an API key: add it on the Models page. Until then recognition runs on this computer.";
         else if ((cloud == null || cfg.Recognition.FallbackToLocal) && !localReady && _host.DownloadProgress(localPath) == null)
             problem = _modelChoices.Count == 0 || (_modelChoices.Count == 1 && !File.Exists(AppPaths.Resolve(_modelChoices[0].Value)))
@@ -373,6 +386,8 @@ internal sealed class SpeechPage : Page
         if (_updating || i < 0 || i >= _modelChoices.Count)
             return;
         var choice = _modelChoices[i];
+        if (choice.Engine == "None")
+            return;
         // The engine follows the model; the local model is kept as the cloud's fallback when a cloud model is chosen
         if (CloudProviders.FirstOrDefault(p => p.Engine == choice.Engine) is { } provider)
         {
@@ -398,27 +413,26 @@ internal sealed class SpeechPage : Page
             _shownPolish = cfg.Polish.Enabled;
             _polish.IsChecked = cfg.Polish.Enabled;
         }
-        if (model != _shownLlmModel)
+        // The local models and, with a key, the cloud ones (the same choices as translation's)
+        var cloud = Polisher.CloudName(cfg);
+        var signature = $"{model}|{cfg.Polish.Engine}|{cfg.Cloud.GeminiTextModel}|{cfg.Cloud.GroqTextModel}|" +
+                        $"{cfg.Cloud.GeminiApiKey.Trim().Length > 0}|{cfg.Cloud.GroqApiKey.Trim().Length > 0}";
+        if (signature != _shownLlmModel)
         {
-            _shownLlmModel = model;
-            var titles = LlmModels.Catalog.Select(m => $"{m.Title} · {m.Size}").ToList();
-            _llmModelPaths = LlmModels.Catalog.Select(m => "models/" + m.File).ToList();
-            var index = LlmModels.Find(model) is { } known ? LlmModels.Catalog.ToList().IndexOf(known) : -1;
-            if (index < 0)
-            {
-                titles.Add($"Custom: {Path.GetFileName(model)}");
-                _llmModelPaths.Add(model);
-                index = titles.Count - 1;
-            }
-            _llmModels.ItemsSource = titles;
+            _shownLlmModel = signature;
+            _llmChoices = NotesSettingsPage.TextModelChoices(cfg, cfg.Polish.Engine, cloud, out var index);
+            _llmModels.ItemsSource = _llmChoices.Select(c => c.Title).ToList();
             _llmModels.SelectedIndex = index;
-            ToolTip.SetTip(_llmModels, LlmModels.Find(model)?.Hint ?? "Set in the config (LocalLlm.ModelPath): any instruction-tuned GGUF model.");
+            ToolTip.SetTip(_llmModels, cloud != null
+                ? $"The dictated text is sent to {(cloud == "Groq" ? "Groq" : "Google")} to check; translation uses the same cloud model"
+                : LlmModels.Find(model)?.Hint ?? "Set in the config (LocalLlm.ModelPath): any instruction-tuned GGUF model.");
         }
 
         var used = cfg.Polish.Enabled;
         _llmModels.IsEnabled = used;
-        _llmStatus.IsVisible = used;
-        if (used)
+        // The local model's state (downloaded, loaded) only while it is the one checking
+        _llmStatus.IsVisible = used && cloud == null;
+        if (used && cloud == null)
             Widgets.RenderItems(_llmStatus, _host.GetLanguageModelItems(), ref _shownLlmStatus, () =>
             {
                 _shownLlmStatus = null;
@@ -436,8 +450,8 @@ internal sealed class SpeechPage : Page
     private void OnLlmModelSelected()
     {
         var i = _llmModels.SelectedIndex;
-        if (_updating || i < 0 || i >= _llmModelPaths.Count)
+        if (_updating || i < 0 || i >= _llmChoices.Count)
             return;
-        Widgets.Save(_host, "LocalLlm", "ModelPath", _llmModelPaths[i], _polishNote);
+        NotesSettingsPage.SaveTextModel(_host, _llmChoices[i], "Polish", "Engine", _polishNote);
     }
 }

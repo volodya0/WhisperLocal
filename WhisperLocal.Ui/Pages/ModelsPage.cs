@@ -46,12 +46,21 @@ internal sealed class ModelsPage : Page
     {
         _host = host;
 
-        Add(DarkTheme.Section("Speech recognition", new StackPanel
+        // Lite has no local models: only the cloud keys
+        if (AppEdition.IsLite)
         {
-            Spacing = 4,
-            Children = { _speechRows, _note.Line },
-        }));
-        if (host.HasGrammarCheck)
+            var lite = DarkTheme.MutedLabel("WhisperLocal Lite recognises and translates with Gemini or Groq: add a key for either " +
+                                            "(both free). Home → Install Full adds models that run on this computer.", 12);
+            lite.TextWrapping = TextWrapping.Wrap;
+            Add(lite);
+        }
+        else
+            Add(DarkTheme.Section("Speech recognition", new StackPanel
+            {
+                Spacing = 4,
+                Children = { _speechRows, _note.Line },
+            }));
+        if (host.HasGrammarCheck && !AppEdition.IsLite)
             Add(DarkTheme.Section("Language models", _llmRows));
         if (host.HasSpeakerSeparation)
             Add(DarkTheme.Section("Speaker separation", _voiceRows));
@@ -62,20 +71,23 @@ internal sealed class ModelsPage : Page
         Grid.SetColumn(_unloadAll, 1);
         _unloadAll.VerticalAlignment = VerticalAlignment.Center;
         unload.Children.Add(_unloadAll);
-        Add(DarkTheme.Section("Memory", new StackPanel
+        if (!AppEdition.IsLite)
         {
-            Spacing = 6,
-            Children = { _loaded, DarkTheme.Separator(), unload, _memoryNote.Line },
-        }));
-        Add(DarkTheme.Section("Folder", FolderRow()));
+            Add(DarkTheme.Section("Memory", new StackPanel
+            {
+                Spacing = 6,
+                Children = { _loaded, DarkTheme.Separator(), unload, _memoryNote.Line },
+            }));
+            Add(DarkTheme.Section("Folder", FolderRow()));
+        }
         _gemini = new CloudCard(host, "Gemini", "Google Gemini", "Speech · Text", "GeminiApiKey", "AIza…", "Google", "Google AI Studio",
             "AI Studio shows it after Create API key.", GeminiClient.KeyPage, GeminiClient.UsagePage,
             "With a key, the Gemini models appear in Speech to Text → Model" +
-            (OperatingSystem.IsMacOS() ? " and Notes & Translate → Translation model." : "."), GeminiClient.CheckKeyAsync);
+            (OperatingSystem.IsMacOS() ? " and Notes & Translate → Speech model and Translation model." : "."), GeminiClient.CheckKeyAsync);
         _groq = new CloudCard(host, "Groq", "Groq", "Speech · Text", "GroqApiKey", "gsk_…", "Groq", "the Groq console",
             "the Groq console shows it after Create API Key.", GroqClient.KeyPage, GroqClient.UsagePage,
             "With a key, Whisper on Groq appears in Speech to Text → Model" +
-            (OperatingSystem.IsMacOS() ? ", and Llama in Notes & Translate → Translation model." : "."), GroqClient.CheckKeyAsync);
+            (OperatingSystem.IsMacOS() ? " and Notes & Translate → Speech model, and Llama in Notes & Translate → Translation model." : "."), GroqClient.CheckKeyAsync);
         Add(DarkTheme.Section("Cloud", new StackPanel
         {
             Spacing = 6,
@@ -97,13 +109,16 @@ internal sealed class ModelsPage : Page
     public override void Refresh()
     {
         var cfg = _host.Config.Current;
-        RefreshSpeech(cfg);
-        if (_host.HasGrammarCheck)
-            RefreshLlm(cfg);
-        if (_host.HasSpeakerSeparation)
-            RefreshVoice(cfg);
-        RefreshLoaded();
-        RefreshIdle(cfg.Memory.IdleUnloadMinutes);
+        if (!AppEdition.IsLite)
+        {
+            RefreshSpeech(cfg);
+            if (_host.HasGrammarCheck)
+                RefreshLlm(cfg);
+            if (_host.HasSpeakerSeparation)
+                RefreshVoice(cfg);
+            RefreshLoaded();
+            RefreshIdle(cfg.Memory.IdleUnloadMinutes);
+        }
         _gemini.Refresh(cfg.Cloud.GeminiApiKey.Trim());
         _groq.Refresh(cfg.Cloud.GroqApiKey.Trim());
     }
@@ -143,15 +158,16 @@ internal sealed class ModelsPage : Page
     private void RefreshLlm(AppConfig cfg)
     {
         var current = cfg.LocalLlm.ModelPath;
-        // Translation with Gemini or Groq does not use the local model
+        // The grammar check and translation with Gemini or Groq do not use the local model
         var translating = cfg.Listen.TranslateTo.Trim().Length > 0 && Translator.CloudName(cfg) == null;
-        var used = cfg.Polish.Enabled || translating;
-        var inUse = (cfg.Polish.Enabled, translating) switch
+        var polishing = cfg.Polish.Enabled && Polisher.CloudName(cfg) == null;
+        var used = polishing || translating;
+        var inUse = (polishing, translating) switch
         {
             (true, true) => "Used by the grammar check and translation",
             (true, false) => "Used by the grammar check",
             (false, true) => "Used for translation",
-            _ => "Selected for the grammar check and translation (both off)",
+            _ => "Selected for the grammar check and translation (neither uses it now)",
         };
         var rows = LlmModels.Catalog
             .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, LlmModels.Find(current) == m, inUse, used, m.Url,
@@ -419,6 +435,12 @@ internal sealed class ModelsPage : Page
                 var paste = Widgets.Fields(("API key", _keyBox), ("", save));
                 paste.Margin = new Thickness(18, 0, 0, 0);
                 Panel.Children.Add(paste);
+                var plain = DarkTheme.Label("The key is saved unencrypted, as plain text, in config.json on this computer: anyone "
+                    + $"who can read that file can use it. Keep the file private, and remove the key here and in {_console} when you no longer need it.",
+                    11, brush: DarkTheme.Warning);
+                plain.TextWrapping = TextWrapping.Wrap;
+                plain.Margin = new Thickness(18, 0, 0, 0);
+                Panel.Children.Add(plain);
             }
             _note.Line.Margin = new Thickness(18, 0, 0, 0);
             Panel.Children.Add(_note.Line);

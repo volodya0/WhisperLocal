@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using WhisperLocal.Config;
 using WhisperLocal.Llm;
 using WhisperLocal.Mac.Interop;
 using WhisperLocal.Pipeline;
@@ -7,8 +8,9 @@ using static WhisperLocal.Mac.Interop.ObjC;
 namespace WhisperLocal.Mac.Ui;
 
 /// <summary>
-/// The listening indicator, first just above the recording indicator: elapsed time, a menu to choose the translation
-/// language, buttons to open the notes and to stop, and below them the session's lines in a scrolling list, with the
+/// The listening indicator, first just above the recording indicator: elapsed time, switches for including the user
+/// ("Me") and for telling the speakers apart, a menu to choose the translation language, buttons to open the notes
+/// and to stop, and below them the session's lines in a scrolling list, with the
 /// sentence still being spoken greyed at the end. While translating, the original and its translation stand side by
 /// side, row by row; new lines and translations fade in. New lines scroll into view unless you scrolled up to read.
 /// Resizable by its edges, movable by its background; keeps its size and place for the next session. Stays until
@@ -18,7 +20,7 @@ internal sealed class ListenPanel : IDisposable
 {
     private const double Width = 720;
     private const double Height = 170;
-    private const double MinWidth = 420;
+    private const double MinWidth = 480;
     private const double MinHeight = 110;
     private const double Padding = 12;
     private const double HeaderHeight = 24;
@@ -49,12 +51,16 @@ internal sealed class ListenPanel : IDisposable
 
     private readonly SynchronizationContext _ui;
     private readonly Func<string, bool> _chooseLanguage;
+    private readonly Func<bool, bool> _setIncludeMe;
+    private readonly Func<bool, bool> _setSeparateSpeakers;
     private readonly Func<string?> _hint;
     private readonly IntPtr _panel;
     private readonly IntPtr _background;
     private readonly IntPtr _status;
     private readonly IntPtr _popup;
     private readonly IntPtr[] _buttons;
+    private readonly IntPtr _me;
+    private readonly IntPtr _speakers;
     private readonly IntPtr _scroll;
     private readonly IntPtr _list; // the scroll view's document: rows top to bottom
     private readonly List<Row> _rows = [];
@@ -63,6 +69,8 @@ internal sealed class ListenPanel : IDisposable
 
     private List<string> _languages = [];
     private string _language = "";
+    private bool _includeMe;
+    private bool _separateSpeakers;
     private long _since;
     private bool _finishing;
     private string? _problem;
@@ -71,11 +79,16 @@ internal sealed class ListenPanel : IDisposable
     private bool _placed;
 
     /// <param name="chooseLanguage">Gets the chosen code ("" for the original); false keeps the previous choice.</param>
+    /// <param name="setIncludeMe">Gets whether to include the user from now on; false keeps the previous choice.</param>
+    /// <param name="setSeparateSpeakers">Gets whether to tell the speakers apart from now on; false keeps the previous choice.</param>
     /// <param name="hint">Shown instead of the text while nothing was heard yet (e.g. a permission hint), or null.</param>
-    public ListenPanel(SynchronizationContext ui, Action stop, Action openNotes, Func<string, bool> chooseLanguage, Func<string?> hint)
+    public ListenPanel(SynchronizationContext ui, Action stop, Action openNotes, Func<string, bool> chooseLanguage,
+        Func<bool, bool> setIncludeMe, Func<bool, bool> setSeparateSpeakers, Func<string?> hint)
     {
         _ui = ui;
         _chooseLanguage = chooseLanguage;
+        _setIncludeMe = setIncludeMe;
+        _setSeparateSpeakers = setSeparateSpeakers;
         _hint = hint;
         (_panel, _background) = Hud.CreatePanel(Width, Height, 0.92, resizable: true);
         Send(_panel, Sel("setIgnoresMouseEvents:"), false);
@@ -106,6 +119,12 @@ internal sealed class ListenPanel : IDisposable
         foreach (var button in _buttons)
             Send(content, Sel("addSubview:"), button);
 
+        _me = PolishPanel.IconButton("mic.fill", "Me", "", OnIncludeMeClicked);
+        _speakers = PolishPanel.IconButton("person.2.fill", "Speakers", "", OnSeparateSpeakersClicked);
+        Send(content, Sel("addSubview:"), _me);
+        Send(content, Sel("addSubview:"), _speakers);
+        Send(_speakers, Sel("setHidden:"), AppEdition.IsLite); // Lite has no voice model: the others are all "Them"
+
         // The lines scroll; the scroller shows only while scrolling (overlay style)
         _scroll = Send(Send(Class("NSScrollView"), Sel("alloc")), Sel("initWithFrame:"), new NSRect(0, 0, 100, 100));
         Send(_scroll, Sel("setDrawsBackground:"), false);
@@ -131,7 +150,7 @@ internal sealed class ListenPanel : IDisposable
     public bool IsVisible { get; private set; }
 
     /// <summary>Shows the panel for a new session; <paramref name="languages"/> are the codes offered besides the original.</summary>
-    public void Show(IReadOnlyList<string> languages, string language)
+    public void Show(IReadOnlyList<string> languages, string language, bool includeMe, bool separateSpeakers)
     {
         _lines.Clear();
         _finishing = false;
@@ -150,6 +169,11 @@ internal sealed class ListenPanel : IDisposable
             Send(_popup, Sel("addItemWithTitle:"), Str("→ " + Translator.NativeName(code)));
         SelectLanguage();
         Send(_popup, Sel("setEnabled:"), true);
+        _includeMe = includeMe;
+        _separateSpeakers = separateSpeakers;
+        ShowSwitches();
+        Send(_me, Sel("setEnabled:"), true);
+        Send(_speakers, Sel("setEnabled:"), true);
 
         // The first time above the recording indicator; afterwards where (and as large as) the user left it
         NSRect frame;
@@ -220,6 +244,8 @@ internal sealed class ListenPanel : IDisposable
     {
         _finishing = true;
         Send(_popup, Sel("setEnabled:"), false);
+        Send(_me, Sel("setEnabled:"), false);
+        Send(_speakers, Sel("setEnabled:"), false);
         Tick();
     }
 
@@ -243,6 +269,38 @@ internal sealed class ListenPanel : IDisposable
             Render(fadeIn: null); // one column or two
         }
         SelectLanguage();
+    }
+
+    private void OnIncludeMeClicked()
+    {
+        if (_setIncludeMe(!_includeMe))
+            _includeMe = !_includeMe;
+        ShowSwitches();
+    }
+
+    private void OnSeparateSpeakersClicked()
+    {
+        if (_setSeparateSpeakers(!_separateSpeakers))
+            _separateSpeakers = !_separateSpeakers;
+        ShowSwitches();
+    }
+
+    /// <summary>Each switch in its color when on (the user's green, a speaker's color), crossed out and grey when off.</summary>
+    private void ShowSwitches()
+    {
+        ShowSwitch(_me, _includeMe, "mic.fill", "mic.slash", MeColor,
+            _includeMe ? "Me: writing down what you say too. Click to leave yourself out" : "Me: left out. Click to write down what you say too");
+        ShowSwitch(_speakers, _separateSpeakers, "person.2.fill", "person.2.slash", SpeakerColors[0],
+            _separateSpeakers ? "Speakers: told apart, [1], [2], …. Click to label them all [Them]" : "Speakers: all [Them]. Click to tell them apart");
+    }
+
+    private static void ShowSwitch(IntPtr button, bool on, string onSymbol, string offSymbol, (double R, double G, double B) color, string tooltip)
+    {
+        var image = Send(Class("NSImage"), Sel("imageWithSystemSymbolName:accessibilityDescription:"), Str(on ? onSymbol : offSymbol), Str(tooltip));
+        if (image != IntPtr.Zero)
+            Send(button, Sel("setImage:"), image);
+        Send(button, Sel("setContentTintColor:"), Color(on ? color : MutedColor));
+        Send(button, Sel("setToolTip:"), Str(tooltip));
     }
 
     private void SelectLanguage() =>
@@ -280,7 +338,7 @@ internal sealed class ListenPanel : IDisposable
     private static (double R, double G, double B) Dim((double R, double G, double B) c) =>
         (c.R * 0.67 + MutedColor.R * 0.33, c.G * 0.67 + MutedColor.G * 0.33, c.B * 0.67 + MutedColor.B * 0.33);
 
-    /// <summary>Places the header (status left; menu and buttons right) and the list below it for the panel's size.</summary>
+    /// <summary>Places the header (status left; switches, menu and buttons right) and the list below it for the panel's size.</summary>
     private void Layout()
     {
         var size = SendRect(Send(_panel, Sel("contentView")), Sel("bounds"));
@@ -290,7 +348,10 @@ internal sealed class ListenPanel : IDisposable
             Send(_buttons[i], Sel("setFrame:"), new NSRect(right - (_buttons.Length - i) * (ButtonSize + 4) + 4, top, ButtonSize, ButtonSize));
         var popupX = right - _buttons.Length * (ButtonSize + 4) - 4 - PopupWidth;
         Send(_popup, Sel("setFrame:"), new NSRect(popupX, top, PopupWidth, HeaderHeight));
-        Send(_status, Sel("setFrame:"), new NSRect(Padding + 2, top + 3, Math.Max(40, popupX - Padding - 10), 18));
+        var switchesX = popupX - 8 - (AppEdition.IsLite ? 1 : 2) * (ButtonSize + 4) + 4;
+        Send(_me, Sel("setFrame:"), new NSRect(switchesX, top, ButtonSize, ButtonSize));
+        Send(_speakers, Sel("setFrame:"), new NSRect(switchesX + ButtonSize + 4, top, ButtonSize, ButtonSize));
+        Send(_status, Sel("setFrame:"), new NSRect(Padding + 2, top + 3, Math.Max(40, switchesX - Padding - 10), 18));
         Send(_scroll, Sel("setFrame:"), new NSRect(Padding, Padding, size.Width - Padding * 2, Math.Max(20, top - 8 - Padding)));
     }
 
@@ -429,6 +490,8 @@ internal sealed class ListenPanel : IDisposable
         Send(_panel, Sel("orderOut:"), IntPtr.Zero);
         foreach (var button in _buttons)
             Release(button);
+        Release(_me);
+        Release(_speakers);
         foreach (var row in _rows)
         {
             Release(row.Original);

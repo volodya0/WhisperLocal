@@ -41,6 +41,7 @@ internal sealed class NotesSettingsPage : Page
     private readonly ComboBox _heard = DarkTheme.Dropdown(190);
     private readonly ComboBox _translateTo = DarkTheme.Dropdown(190);
     private readonly ComboBox _translationModel = DarkTheme.Dropdown(290);
+    private readonly ComboBox _speechModels = DarkTheme.Dropdown(290);
     private readonly ComboBox _speed = DarkTheme.Dropdown(190);
     private readonly ComboBox _liveTranslation = DarkTheme.Dropdown(190);
     private readonly TextBlock _modelMissing = DarkTheme.Label("", 12, brush: DarkTheme.Warning);
@@ -61,6 +62,7 @@ internal sealed class NotesSettingsPage : Page
     private List<string> _heardCodes = [];
     private List<string> _translateCodes = [];
     private List<TranslationChoice> _modelChoices = [];
+    private List<SpeechChoice> _speechChoices = [];
     private List<int> _liveTranslationValues = [];
     private bool _recording;
     private bool _updating;
@@ -131,6 +133,9 @@ internal sealed class NotesSettingsPage : Page
                 Widgets.Save(_host, "Listen", "TranslateTo", _translateCodes[i], _listenNote);
         };
         _translationModel.SelectionChanged += (_, _) => OnTranslationModelSelected();
+        _speechModels.SelectionChanged += (_, _) => OnSpeechModelSelected();
+        _separateSpeakers.IsVisible = !AppEdition.IsLite; // Lite has no voice model: the others are all "Them"
+        _speechModel.TextWrapping = TextWrapping.Wrap;
         _includeMe.IsCheckedChanged += (_, _) =>
         {
             if (!_updating)
@@ -191,13 +196,16 @@ internal sealed class NotesSettingsPage : Page
                 _includeMe,
                 _separateSpeakers,
                 _voiceMissingRow,
-                Widgets.Fields(("Heard in", _heard), ("Translate into", _translateTo)),
-                Widgets.Fields(("Translation model", _translationModel)),
-                Widgets.Fields(("Line speed", _speed)),
-                Widgets.Fields(("Translate while speaking", _liveTranslation)),
+                Widgets.Table(
+                    ("Heard in", _heard),
+                    ("Translate into", _translateTo),
+                    ("Speech model", _speechModels),
+                    ("", _speechModel),
+                    ("Translation model", _translationModel),
+                    ("Line speed", _speed),
+                    ("Translate while speaking", _liveTranslation)),
                 _modelMissingRow,
                 _translationCloud,
-                _speechModel,
                 _listenNote.Line,
             },
         };
@@ -242,6 +250,7 @@ internal sealed class NotesSettingsPage : Page
         RefreshSpeakers(listen);
         var signature = $"{listen.Hotkey}|{listen.Language}|{listen.TranslateTo}|{string.Join(",", listen.Languages)}|{cfg.LocalLlm.ModelPath}|" +
                         $"{listen.TranslateEngine}|{cfg.Cloud.GeminiTextModel}|{cfg.Cloud.GroqTextModel}|" +
+                        $"{listen.RecognitionEngine}|{cfg.Whisper.ModelPath}|{cfg.Cloud.GeminiModel}|{cfg.Cloud.GroqModel}|" +
                         $"{cfg.Cloud.GeminiApiKey.Trim().Length > 0}|{cfg.Cloud.GroqApiKey.Trim().Length > 0}|" +
                         $"{listen.PauseMs}|{listen.MaxSegmentSec}|{listen.ProvisionalMs}|{listen.TranslateWhileSpeakingMs}";
         if (signature == _shownListen || _recording)
@@ -266,18 +275,24 @@ internal sealed class NotesSettingsPage : Page
         _translateTo.ItemsSource = _translateCodes.Select(c => c.Length == 0 ? "Original only" : Translator.NativeName(c)).ToList();
         _translateTo.SelectedIndex = _translateCodes.IndexOf(target);
 
-        RefreshSpeed(listen);
+        RefreshSpeed(cfg);
 
         _modelChoices = TranslationChoices(cfg, out var index);
         _translationModel.ItemsSource = _modelChoices.Select(c => c.Title).ToList();
         _translationModel.SelectedIndex = index;
 
+        _speechChoices = SpeechChoices(cfg, out var speech);
+        _speechModels.ItemsSource = _speechChoices.Select(c => c.Title).ToList();
+        _speechModels.SelectedIndex = speech;
+        ToolTip.SetTip(_speechModels, _speechChoices[speech].Hint);
+
         _updating = false;
     }
 
     /// <summary>The line speed preset matching the config ("Custom" when edited by hand) and the live translation interval.</summary>
-    private void RefreshSpeed(ListenConfig listen)
+    private void RefreshSpeed(AppConfig cfg)
     {
+        var listen = cfg.Listen;
         var titles = Speeds.Select(s => s.Title).ToList();
         var index = Array.FindIndex(Speeds, s => s.PauseMs == listen.PauseMs && s.MaxSegmentSec == listen.MaxSegmentSec && s.ProvisionalMs == listen.ProvisionalMs);
         if (index < 0)
@@ -300,17 +315,18 @@ internal sealed class NotesSettingsPage : Page
         }
         _liveTranslation.ItemsSource = liveTitles;
         _liveTranslation.SelectedIndex = live;
-        // The sentence being spoken is translated only when its text is shown
-        _liveTranslation.IsEnabled = listen.ProvisionalMs > 0;
+        // The sentence being spoken is translated only when its text is shown, which cloud recognition leaves out
+        _liveTranslation.IsEnabled = listen.ProvisionalMs > 0 && RecognitionRouter.ListenCloudName(cfg) == null;
     }
 
     // ---- Translation model: local language models and, with a key, cloud ones ----
 
     /// <summary>
-    /// A translation model: local (<paramref name="Engine"/> "Local", <paramref name="Value"/> is LocalLlm.ModelPath)
-    /// or cloud ("Gemini" or "Groq", <paramref name="Value"/> is Cloud.GeminiTextModel or Cloud.GroqTextModel).
+    /// A language model for translation or the grammar check: local (<paramref name="Engine"/> "Local",
+    /// <paramref name="Value"/> is LocalLlm.ModelPath) or cloud ("Gemini" or "Groq", <paramref name="Value"/> is
+    /// Cloud.GeminiTextModel or Cloud.GroqTextModel); "None" is the placeholder of Lite without a key.
     /// </summary>
-    private sealed record TranslationChoice(string Title, string Engine, string Value);
+    internal sealed record TranslationChoice(string Title, string Engine, string Value);
 
     private static readonly (string Engine, string Vendor, string Property, (string Title, string Id)[] Models)[] CloudTextModels =
     [
@@ -322,17 +338,35 @@ internal sealed class NotesSettingsPage : Page
 
     private static string CloudTextModel(AppConfig c, string engine) => engine == "Groq" ? c.Cloud.GroqTextModel : c.Cloud.GeminiTextModel;
 
-    /// <summary>Every local model, the cloud ones with a key, and always the current choice (even without its key).</summary>
-    private static List<TranslationChoice> TranslationChoices(AppConfig cfg, out int index)
+    private static List<TranslationChoice> TranslationChoices(AppConfig cfg, out int index) =>
+        TextModelChoices(cfg, cfg.Listen.TranslateEngine, Translator.CloudName(cfg), out index);
+
+    /// <summary>
+    /// Every local model, the cloud ones with a key, and always the current choice (even without its key), for a
+    /// feature whose engine setting is <paramref name="engineSetting"/> and that uses <paramref name="cloudInUse"/>.
+    /// Translation and the grammar check share the models (LocalLlm.ModelPath, Cloud.*TextModel).
+    /// </summary>
+    internal static List<TranslationChoice> TextModelChoices(AppConfig cfg, string engineSetting, string? cloudInUse, out int index)
     {
+        // Lite has no local language model: only the cloud ones, and the cloud in use stands for the choice
         var model = cfg.LocalLlm.ModelPath;
-        var choices = LlmModels.Catalog.Select(m => new TranslationChoice($"{m.Title} · {m.Size}", "Local", "models/" + m.File)).ToList();
-        if (LlmModels.Find(model) == null)
+        List<TranslationChoice> choices = AppEdition.IsLite
+            ? []
+            : LlmModels.Catalog.Select(m => new TranslationChoice($"{m.Title} · {m.Size}", "Local", "models/" + m.File)).ToList();
+        if (!AppEdition.IsLite && LlmModels.Find(model) == null)
             choices.Add(new TranslationChoice($"Custom: {Path.GetFileName(model)}", "Local", model));
         foreach (var (engine, vendor, _, models) in CloudTextModels.Where(p => CloudKey(cfg, p.Engine).Length > 0))
             choices.AddRange(models.Select(m => new TranslationChoice($"{m.Title} · {vendor} cloud", engine, m.Id)));
 
-        var wanted = CloudTextModels.FirstOrDefault(p => string.Equals(cfg.Listen.TranslateEngine, p.Engine, StringComparison.OrdinalIgnoreCase));
+        var wanted = CloudTextModels.FirstOrDefault(p => string.Equals(engineSetting, p.Engine, StringComparison.OrdinalIgnoreCase));
+        if (wanted.Engine == null && AppEdition.IsLite)
+            wanted = CloudTextModels.FirstOrDefault(p => p.Engine == cloudInUse);
+        if (AppEdition.IsLite && wanted.Engine == null)
+        {
+            choices.Add(new TranslationChoice("No cloud key yet", "None", ""));
+            index = 0;
+            return choices;
+        }
         if (wanted.Engine != null)
         {
             var current = CloudTextModel(cfg, wanted.Engine);
@@ -355,29 +389,101 @@ internal sealed class NotesSettingsPage : Page
         var i = _translationModel.SelectedIndex;
         if (_updating || i < 0 || i >= _modelChoices.Count)
             return;
-        var choice = _modelChoices[i];
-        if (CloudTextModels.FirstOrDefault(p => p.Engine == choice.Engine) is { Engine: not null } provider)
-            Widgets.Save(_host, "Cloud", provider.Property, choice.Value, _listenNote);
-        else
-            Widgets.Save(_host, "LocalLlm", "ModelPath", choice.Value, _listenNote);
-        Widgets.Save(_host, "Listen", "TranslateEngine", choice.Engine, _listenNote);
+        SaveTextModel(_host, _modelChoices[i], "Listen", "TranslateEngine", _listenNote);
     }
 
-    /// <summary>Which speech model listening hears with: the local one set up in Speech to Text, even when dictation uses the cloud.</summary>
+    /// <summary>Saves a chosen language model (<see cref="TextModelChoices"/>) and the engine of the feature that uses it.</summary>
+    internal static void SaveTextModel(IAppHost host, TranslationChoice choice, string section, string engineProperty, Note note)
+    {
+        if (choice.Engine == "None")
+            return;
+        if (CloudTextModels.FirstOrDefault(p => p.Engine == choice.Engine) is { Engine: not null } provider)
+            Widgets.Save(host, "Cloud", provider.Property, choice.Value, note);
+        else
+            Widgets.Save(host, "LocalLlm", "ModelPath", choice.Value, note);
+        Widgets.Save(host, section, engineProperty, choice.Engine, note);
+    }
+
+    // ---- Speech model: the local one set in Speech to Text, or, with a key, a cloud one ----
+
+    /// <summary>
+    /// A speech model for listening: the local one (<paramref name="Engine"/> "Local", <paramref name="Value"/> is
+    /// Whisper.ModelPath) or a cloud one ("Gemini" or "Groq", <paramref name="Value"/> is Cloud.GeminiModel or Cloud.GroqModel).
+    /// </summary>
+    private sealed record SpeechChoice(string Title, string Engine, string Value, string Hint);
+
+    /// <summary>
+    /// The local model from Speech to Text, then the cloud models with a key; the current choice is always listed, even
+    /// without its key, so the setting stays visible.
+    /// </summary>
+    private static List<SpeechChoice> SpeechChoices(AppConfig cfg, out int index)
+    {
+        var path = cfg.Whisper.ModelPath;
+        var name = WhisperModels.Find(path)?.Title ?? Path.GetFileName(path);
+        var choices = new List<SpeechChoice>();
+        if (!AppEdition.IsLite)
+            choices.Add(new($"{name} · on this computer", "Local", path,
+                "The local model set in Speech to Text (changing it there changes it here); the audio stays on this Mac."));
+        foreach (var p in SpeechPage.CloudProviders.Where(p => p.Key(cfg).Length > 0))
+            choices.AddRange(p.Models.Select(m => new SpeechChoice($"{m.Title} · {p.Vendor} cloud", p.Engine, m.Id,
+                $"{m.Hint} Each line's audio is sent to {p.Vendor}; dictation in the {p.Vendor} cloud uses the same model.")));
+
+        index = 0;
+        // Lite has no local model: the cloud in use stands for the choice even when the config says "Local"
+        var wanted = SpeechPage.CloudProviders.FirstOrDefault(p => string.Equals(cfg.Listen.RecognitionEngine, p.Engine, StringComparison.OrdinalIgnoreCase))
+                     ?? (AppEdition.IsLite ? SpeechPage.CloudProviders.FirstOrDefault(p => p.Engine == RecognitionRouter.ListenCloudName(cfg)) : null);
+        if (wanted == null)
+        {
+            if (choices.Count == 0)
+                choices.Add(new SpeechChoice("No cloud key yet", "None", "", "Add a Gemini or Groq key on the Models page."));
+            return choices;
+        }
+        var model = wanted.Model(cfg);
+        index = choices.FindIndex(c => c.Engine == wanted.Engine && c.Value == model);
+        if (index >= 0)
+            return choices;
+        var known = wanted.Models.FirstOrDefault(m => m.Id == model);
+        var title = known.Title ?? model;
+        choices.Add(new SpeechChoice(wanted.Key(cfg).Length > 0 ? $"{title} · {wanted.Vendor} cloud" : $"{title} · needs an API key",
+            wanted.Engine, model, known.Hint ?? $"Set in the config (Cloud.{wanted.ModelProperty})."));
+        index = choices.Count - 1;
+        return choices;
+    }
+
+    /// <summary>The engine follows the model; a cloud model is the same one dictation uses in that cloud.</summary>
+    private void OnSpeechModelSelected()
+    {
+        var i = _speechModels.SelectedIndex;
+        if (_updating || i < 0 || i >= _speechChoices.Count)
+            return;
+        var choice = _speechChoices[i];
+        if (choice.Engine == "None")
+            return;
+        if (SpeechPage.CloudProviders.FirstOrDefault(p => p.Engine == choice.Engine) is { } provider)
+            Widgets.Save(_host, "Cloud", provider.ModelProperty, choice.Value, _listenNote);
+        Widgets.Save(_host, "Listen", "RecognitionEngine", choice.Engine, _listenNote);
+    }
+
+    /// <summary>Where listening's speech goes, under the Speech model; checked every time (a download finishing, a key added).</summary>
     private void RefreshSpeechModel(AppConfig cfg)
     {
         var path = cfg.Whisper.ModelPath;
         var name = WhisperModels.Find(path)?.Title ?? Path.GetFileName(path);
         var ready = File.Exists(AppPaths.Resolve(path));
-        var cloud = RecognitionRouter.CloudName(cfg);
-        _speechModel.Text = (cloud != null, ready) switch
-        {
-            (false, true) => $"Speech is recognised with {name}, the model set in Speech to Text; changing it there changes it here.",
-            (true, true) => $"Speech is recognised on this computer with {name}, the local model set in Speech to Text " +
-                            $"(dictation uses {cloud}; listening never sends audio to the cloud).",
-            _ => $"Speech is recognised with {name}, the local model set in Speech to Text: it is not downloaded yet.",
-        };
-        _speechModel.Foreground = ready ? DarkTheme.Muted : DarkTheme.Warning;
+        var cloud = RecognitionRouter.ListenCloudName(cfg);
+        var wanted = SpeechPage.CloudProviders.FirstOrDefault(p => string.Equals(cfg.Listen.RecognitionEngine, p.Engine, StringComparison.OrdinalIgnoreCase));
+        _speechModel.Text = cloud == null && AppEdition.IsLite
+            ? "WhisperLocal Lite listens with Gemini or Groq: add a key on the Models page."
+            : cloud != null
+            ? $"The audio of each line is sent to {(cloud == "Groq" ? "Groq" : "Google")} for recognition. A line shows when it is " +
+              "finished (no text while a sentence is spoken, to stay within the free limits)" +
+              (AppEdition.IsLite ? "." : "; speakers are still told apart on this Mac.")
+            : wanted != null
+                ? $"{wanted.Engine} needs an API key: add it on the Models page. Until then speech is recognised on this Mac with {name}."
+                : ready
+                    ? $"Speech is recognised on this Mac with {name}, the model set in Speech to Text; the audio stays here."
+                    : $"{name}, the model set in Speech to Text, is not downloaded yet: download it on the Models page, or choose a cloud model.";
+        _speechModel.Foreground = cloud != null || (wanted == null && ready && !AppEdition.IsLite) ? DarkTheme.Muted : DarkTheme.Warning;
     }
 
     /// <summary>
@@ -393,7 +499,7 @@ internal sealed class NotesSettingsPage : Page
             _separateSpeakers.IsChecked = _shownSeparate = listen.SeparateSpeakers;
         _updating = false;
 
-        var missing = listen.SeparateSpeakers && !File.Exists(AppPaths.Resolve(listen.VoiceModelPath));
+        var missing = listen.SeparateSpeakers && !AppEdition.IsLite && !File.Exists(AppPaths.Resolve(listen.VoiceModelPath));
         _voiceMissingRow.IsVisible = missing;
         if (missing)
             _voiceMissing.Text = _host.DownloadProgress(listen.VoiceModelPath)
@@ -408,7 +514,9 @@ internal sealed class NotesSettingsPage : Page
         var cloud = Translator.CloudName(cfg);
         var wanted = CloudTextModels.FirstOrDefault(p => string.Equals(cfg.Listen.TranslateEngine, p.Engine, StringComparison.OrdinalIgnoreCase));
         string? problem = null;
-        if (wanted.Engine != null && cloud == null)
+        if (AppEdition.IsLite)
+            problem = translating && cloud == null ? "WhisperLocal Lite translates with Gemini or Groq: add a key on the Models page." : null;
+        else if (wanted.Engine != null && cloud == null)
             problem = $"{wanted.Engine} needs an API key: add it on the Models page. Until then the local model translates.";
         else if (translating && cloud == null && !File.Exists(AppPaths.Resolve(cfg.LocalLlm.ModelPath)))
             problem = "The translation model is not downloaded yet: download it on the Models page.";

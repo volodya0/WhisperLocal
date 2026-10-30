@@ -1,5 +1,5 @@
 # Builds WhisperLocal for macOS (a drag-to-Applications DMG, on GitHub's Mac runners) and Windows (a zip of the app
-# folder), on every push to any branch and every pull request: as workflow artifacts on every run, and as one GitHub
+# folder), each as Full and Lite (no local models: -lite.dmg, -lite.zip), on every push to any branch and every pull request: as workflow artifacts on every run, and as one GitHub
 # Release with both downloads, which "Check for Updates" in the apps looks at:
 # - every push to the main branch is released automatically as v1.0.<run number>;
 # - a pushed tag like v1.2.0 is released with that version.
@@ -101,6 +101,17 @@ jobs:
           set -o pipefail
           artifacts/WhisperLocal.app/Contents/MacOS/WhisperLocal --self-test 2>&1 | tee -a build.log
 
+      # Lite replaces artifacts/WhisperLocal.app; the Full DMG is already made
+      - name: Build Lite app and DMG
+        run: |
+          set -o pipefail
+          scripts/build-mac.sh --lite --dmg 2>&1 | tee -a build.log
+
+      - name: Self-test the Lite app
+        run: |
+          set -o pipefail
+          artifacts/WhisperLocal.app/Contents/MacOS/WhisperLocal --self-test 2>&1 | tee -a build.log
+
       # The log tail as an annotation, readable from the checks API without access to the full logs
       - name: Report build failure
         if: failure()
@@ -169,6 +180,30 @@ jobs:
           7z a -tzip -mx=9 -bd WhisperLocal-windows-x64.zip ./WhisperLocal/bin/Release/net8.0-windows/*
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # Lite: the same app without the whisper.cpp runtime, in its own folder
+      - name: Build Lite
+        shell: pwsh
+        run: |
+          $props = @("-p:UpdateRepository=$env:UPDATE_REPOSITORY", "-p:DebugType=none", "-p:Edition=Lite", "-p:OutDir=$PWD/lite/")
+          if ($env:VERSION) { $props += "-p:Version=$env:VERSION" }
+          dotnet build WhisperLocal/WhisperLocal.csproj -c Release @props 2>&1 | Tee-Object -FilePath build.log -Append
+          exit $LASTEXITCODE
+
+      - name: Self-test the Lite app
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath lite/WhisperLocal.exe -ArgumentList '--self-test' `
+            -Wait -PassThru -NoNewWindow -RedirectStandardOutput selftest.out -RedirectStandardError selftest.err
+          Get-Content selftest.out, selftest.err | Tee-Object -FilePath build.log -Append
+          exit $p.ExitCode
+
+      # Ends in -lite.zip, so the Full app's update check (which looks for -windows-x64.zip) never picks it
+      - name: Zip the Lite app
+        shell: pwsh
+        run: |
+          7z a -tzip -mx=9 -bd WhisperLocal-windows-x64-lite.zip ./lite/*
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # What the download consists of, to keep an eye on its size
       - name: Size report
         shell: pwsh
@@ -178,11 +213,12 @@ jobs:
           "App folder: {0:N1} MB in {1} files; zip: {2:N1} MB" -f (($files | Measure-Object Length -Sum).Sum / 1MB), $files.Count, ((Get-Item WhisperLocal-windows-x64.zip).Length / 1MB)
           $files | Sort-Object Length -Descending | Select-Object -First 15 |
             ForEach-Object { "{0,8:N1} MB  {1}" -f ($_.Length / 1MB), $_.FullName.Substring((Resolve-Path $dir).Path.Length + 1) }
+          "Lite zip: {0:N1} MB" -f ((Get-Item WhisperLocal-windows-x64-lite.zip).Length / 1MB)
 
       - uses: actions/upload-artifact@v4
         with:
           name: WhisperLocal-windows-x64
-          path: WhisperLocal-windows-x64.zip
+          path: WhisperLocal-windows-*.zip
           if-no-files-found: error
 
   release:

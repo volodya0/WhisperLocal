@@ -58,7 +58,8 @@ Exit WhisperLocal before rebuilding: the running exe is locked.
    scripts/build-mac.sh --dmg            # or a drag-to-Applications disk image
    ```
    The first run builds whisper.cpp and llama.cpp (pinned tags, see the script) into `WhisperLocal.Mac/Runtime`,
-   which is not in git.
+   which is not in git. `--lite` builds the Lite edition instead (no whisper-server, llama-server or sherpa-onnx; see
+   below), without needing CMake.
 3. The model can be downloaded in the app, or with `scripts/get-model.sh` into
    `~/Library/Application Support/WhisperLocal/models`.
 
@@ -73,19 +74,32 @@ Access is enough) to keep the permission across rebuilds.
 
 Notifications are shown through `osascript`, so they appear as coming from Script Editor.
 
+## Editions: Full and Lite
+
+`-p:Edition=Lite` builds Lite: the `Edition` assembly metadata that `AppEdition.IsLite` reads, and on macOS the `LITE`
+constant. Lite leaves out the whisper.cpp runtime (`Runtime/`), and on macOS llama-server and sherpa-onnx
+(`Voiceprints` becomes a stub). At runtime Lite recognises and translates with whichever cloud has a key when the
+config still says `"Local"` (`RecognitionRouter.AnyCloud`), never falls back to local recognition, and the pages
+hide the local models. Windows: `dotnet build WhisperLocal/WhisperLocal.csproj -c Release -p:Edition=Lite`; macOS:
+`scripts/build-mac.sh --lite`.
+
 ## CI and releases
 
 `.github/workflows/macos.yml` ("Build") runs on every push to any branch, every pull request and on demand. It
 builds the macOS DMG on GitHub's Mac runners (Apple Silicon) and the Windows app on a Windows runner, runs each app's
-`--self-test`, and keeps the DMG and a zip of the Windows app folder as workflow artifacts.
+`--self-test`, and keeps the DMG and a zip of the Windows app folder as workflow artifacts. Each is built twice, Full
+and Lite; Lite's files end in `-lite` (`-arm64-lite.dmg`, `-windows-x64-lite.zip`), so older apps, which look for
+`-arm64.dmg` and `-windows-x64.zip`, never pick Lite.
 
 - Every push to `main` is released automatically as `v1.0.<run number>`, with both downloads.
 - A pushed tag like `v1.2.0` is released with that version.
 
-The release's notes are the commit message. "Check for Updates…" in the apps reads the latest release of the
+The release's notes are the commit message. Home's **Update**/**Install** buttons (one per edition) and "Check for
+Updates…" (this edition) in the apps read the latest release of the
 repository they were built from (`-p:UpdateRepository`) and verifies the download's checksum. macOS also checks the
 DMG's signer, replaces the app and restarts; Windows unpacks the zip and, once the app has quit, copies it over the
-app folder (keeping `config.json`) and starts it again.
+app folder (keeping `config.json`; going to Lite also removes `whisper\`) and starts it again. Switching edition
+installs the other one in any version.
 
 With the repository secrets `MACOS_CERT_P12` (base64 of a `.p12` with a code signing certificate; self-signed is
 enough) and `MACOS_CERT_PASSWORD`, every build carries the same signature, so the Accessibility permission survives

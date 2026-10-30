@@ -38,7 +38,7 @@ public sealed class ListenLine(TimeSpan at, string text, int? speaker = null, st
 /// translates each with the language model. Recognition and translation run as two stages, so a slow translation never
 /// holds up the next segment's text, and up to two lines are translated at once (finished in order). While a segment
 /// is still being spoken, it is transcribed about every Listen.ProvisionalMs as provisional text, whenever no finished
-/// segment is waiting for recognition, and that text is translated at most every Listen.TranslateWhileSpeakingMs.
+/// segment is waiting for recognition and recognition is local (Listen.RecognitionEngine), and that text is translated at most every Listen.TranslateWhileSpeakingMs.
 /// Microphone lines are "Me" (an echo of the speakers is dropped, see <see cref="EchoFilter"/>); the voices in what the
 /// Mac plays are told apart by their voiceprints (<see cref="SpeakerClusters"/>), or are all "Them".
 /// </summary>
@@ -62,6 +62,8 @@ public sealed class LiveListener
     private readonly IVoiceprints? _voiceprints;
     private readonly TextFilters _filters = new();
     private volatile string _translateTo = "";
+    private volatile bool _includeMe = true;
+    private volatile bool _separateSpeakers = true;
 
     /// <summary>One audio source being cut into segments: what was captured since the last cut, and its preview state.</summary>
     private sealed class Capture(ListenSource source, Func<byte[]> drain)
@@ -94,7 +96,7 @@ public sealed class LiveListener
     private List<Capture> _captures = [];
 
     // Speakers of this session
-    private SpeakerClusters? _clusters; // null: the others are all "Them"
+    private SpeakerClusters? _clusters; // see Clusters(); null until speakers are first told apart
     private int _lastOther = 1;
     private EchoFilter _echo = new();
     private readonly List<(Segment Segment, long HeldAt)> _heldMicrophone = []; // waiting for the system audio of the same moments
@@ -112,6 +114,26 @@ public sealed class LiveListener
     {
         get => _translateTo;
         set => _translateTo = value;
+    }
+
+    /// <summary>
+    /// Write down the microphone too, as "Me" (with a microphone source in <see cref="RunAsync"/>); off, what the
+    /// microphone gives is dropped. Applies from the next tick on. Any thread.
+    /// </summary>
+    public bool IncludeMe
+    {
+        get => _includeMe;
+        set => _includeMe = value;
+    }
+
+    /// <summary>
+    /// Tell the voices in what the Mac plays apart (when the voice model is there); off, they are all "Them". The
+    /// speakers told apart so far are kept, so Speaker 1 stays Speaker 1 when it is turned on again. Any thread.
+    /// </summary>
+    public bool SeparateSpeakers
+    {
+        get => _separateSpeakers;
+        set => _separateSpeakers = value;
     }
 
     /// <summary>A segment was recognized (translation, if any, follows in <see cref="Finished"/>).</summary>
@@ -136,11 +158,10 @@ public sealed class LiveListener
     /// <param name="drainSystem">What the Mac played since the previous call, 16 kHz mono 16-bit PCM.</param>
     /// <param name="drainMicrophone">
     /// The same for the microphone, on the system audio's timeline (silence for the time it took to start); null to
-    /// leave the user out.
+    /// leave the user out (<see cref="IncludeMe"/> turns it off and on while listening).
     /// </param>
     public async Task RunAsync(Func<byte[]> drainSystem, Func<byte[]>? drainMicrophone, CancellationToken ct)
     {
-        var cfg = _config.Current;
         _previous = "";
         _nextGeneration = 0;
         _pendingSegments = 0;
@@ -149,7 +170,7 @@ public sealed class LiveListener
         _captures = [new Capture(ListenSource.System, drainSystem) { Generation = _nextGeneration++ }];
         if (drainMicrophone != null)
             _captures.Add(new Capture(ListenSource.Microphone, drainMicrophone) { Generation = _nextGeneration++ });
-        _clusters = cfg.Listen.SeparateSpeakers && _voiceprints is { IsAvailable: true } ? new SpeakerClusters(cfg.Listen.SpeakerThreshold) : null;
+        _clusters = null;
         _lastOther = 1;
         _echo = new EchoFilter();
         _heldMicrophone.Clear();
@@ -196,6 +217,11 @@ public sealed class LiveListener
     private async Task CutAsync(Capture capture, ChannelWriter<Segment> segments, bool final)
     {
         var chunk = capture.Drain();
+        if (capture.Source == ListenSource.Microphone && !IncludeMe)
+        {
+            DropMicrophone(capture, chunk);
+            return;
+        }
         capture.Buffer.Write(chunk);
         if (capture.Source == ListenSource.System)
             _echo.RememberAudio(chunk);
@@ -226,7 +252,7 @@ public sealed class LiveListener
             return;
         }
 
-        if (capture.Source == ListenSource.System && _clusters != null && await SpeakerChangedAsync(capture, pcm, durationMs, level))
+        if (capture.Source == ListenSource.System && Clusters() != null && await SpeakerChangedAsync(capture, pcm, durationMs, level))
         {
             // The line so far goes; from the quietest moment of the window (the gap between turns, if any), the new
             // speaker's start stays for the next one
@@ -241,7 +267,7 @@ public sealed class LiveListener
         var pause = silenceMs >= cfg.Listen.PauseMs && durationMs - silenceMs >= 500;
         if (pause || durationMs >= cfg.Listen.MaxSegmentSec * 1000.0)
             Send(capture, segments, pcm);
-        else if (cfg.Listen.ProvisionalMs > 0 && !_provisionalBusy && _pendingSegments == 0
+        else if (cfg.Listen.ProvisionalMs > 0 && RecognitionRouter.ListenCloudName(cfg) == null && !_provisionalBusy && _pendingSegments == 0
                  && Stopwatch.GetElapsedTime(_provisionalAt).TotalMilliseconds >= cfg.Listen.ProvisionalMs
                  && durationMs - silenceMs > capture.ProvisionalUpToMs + 300
                  // One preview at a time: the other side's, while the Mac speaks
@@ -252,6 +278,32 @@ public sealed class LiveListener
             if (!(capture.Source == ListenSource.Microphone && _echo.IsEcho(pcm, capture.BufferAt)))
                 _ = ProvisionalAsync(pcm, capture.Generation, capture.Source);
         }
+    }
+
+    /// <summary>
+    /// <see cref="IncludeMe"/> is off: what the microphone heard, and the segment it was in, are dropped; the capture
+    /// stays on the timeline, so it lines up again when the user is included again.
+    /// </summary>
+    private void DropMicrophone(Capture capture, byte[] chunk)
+    {
+        capture.Speaking = false;
+        if (capture.Buffer.Length == 0 && chunk.Length == 0)
+            return;
+        capture.BufferAt += TimeSpan.FromMilliseconds(AudioConvert.DurationMs(chunk) + AudioConvert.DurationMs(capture.Buffer.ToArray()));
+        capture.Buffer.SetLength(0);
+        ClearProvisional(capture.Generation, capture.Source);
+        NextSegment(capture);
+    }
+
+    /// <summary>
+    /// The speakers told apart in this session while <see cref="SeparateSpeakers"/> is on and the voice model is there,
+    /// started the first time; null otherwise (the others are all "Them").
+    /// </summary>
+    private SpeakerClusters? Clusters()
+    {
+        if (!SeparateSpeakers || _voiceprints is not { IsAvailable: true })
+            return null;
+        return _clusters ??= new SpeakerClusters(_config.Current.Listen.SpeakerThreshold);
     }
 
     /// <summary>
@@ -276,7 +328,7 @@ public sealed class LiveListener
             }
             var recent = pcm[^window..];
             return AudioConvert.SpeechLevelDbfs(recent) >= minLevel && await Task.Run(() => _voiceprints!.Compute(recent)) is { } print
-                && _clusters!.Differ(capture.Voice, print);
+                && Clusters() is { } clusters && clusters.Differ(capture.Voice, print);
         }
         catch (Exception ex)
         {
@@ -522,19 +574,18 @@ public sealed class LiveListener
     private async Task<(int? Index, string? Name)> SpeakerAsync(Segment segment)
     {
         // Lines carry a speaker with the microphone or with speakers told apart
-        if (_captures.Count == 1 && _clusters == null)
-            return (null, null);
         if (segment.Source == ListenSource.Microphone)
             return (Me, "[Me]");
-        if (_clusters == null)
-            return (null, "[Them]");
+        var clusters = Clusters();
+        if (clusters == null)
+            return _captures.Count > 1 && IncludeMe ? (null, "[Them]") : (null, null);
         try
         {
             var sample = segment.Pcm.Length <= AudioConvert.Bytes(VoiceSampleMs)
                 ? segment.Pcm
                 : segment.Pcm.AsSpan((segment.Pcm.Length - AudioConvert.Bytes(VoiceSampleMs)) / 2 & ~1, AudioConvert.Bytes(VoiceSampleMs)).ToArray();
             if (await Task.Run(() => _voiceprints!.Compute(sample)) is { } print)
-                _lastOther = _clusters.Assign(print, AudioConvert.DurationMs(segment.Pcm) / 1000) + 1;
+                _lastOther = clusters.Assign(print, AudioConvert.DurationMs(segment.Pcm) / 1000) + 1;
         }
         catch (Exception ex)
         {

@@ -108,8 +108,10 @@ internal static class Program
             _ = MacNative.CGEventSourceSecondsSinceLastEventType(MacNative.kCGEventSourceStateHIDSystemState, MacNative.kCGEventKeyDown);
             _ = MacNative.AXIsProcessTrusted();
             _ = FocusedInput.AcceptsText(1); // the AXUIElement functions resolve (the answer itself does not matter here)
+#if !LITE
             // sherpa-onnx's native libraries load (voiceprints for telling speakers apart; no model needed for this)
             new SherpaOnnx.SpeakerEmbeddingManager(8).Dispose();
+#endif
             // Avalonia's native platform and a window of the shared UI
             BuildAvaloniaApp().SetupWithoutStarting();
             _ = new TranscriptWindow();

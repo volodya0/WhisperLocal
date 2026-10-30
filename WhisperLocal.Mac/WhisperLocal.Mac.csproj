@@ -18,6 +18,15 @@
     <Description>Local push-to-talk dictation (whisper.cpp, Metal)</Description>
   </PropertyGroup>
 
+  <!-- Lite (-p:Edition=Lite, or the lite option of scripts/build-mac.sh): no whisper-server, llama-server or sherpa-onnx; speech is
+       recognised with Gemini or Groq (see AppEdition) -->
+  <PropertyGroup Condition="'$(Edition)' == 'Lite'">
+    <DefineConstants>$(DefineConstants);LITE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Edition)' == 'Lite'">
+    <AssemblyMetadata Include="Edition" Value="Lite" />
+  </ItemGroup>
+
   <!-- "owner/repo" whose GitHub releases "Check for Updates" looks at; set by scripts/build-mac.sh -->
   <ItemGroup Condition="'$(UpdateRepository)' != ''">
     <AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" />
@@ -35,12 +44,12 @@
 
   <!-- sherpa-onnx (Apache-2.0): voiceprints that tell speakers apart while listening; its native libraries
        (libsherpa-onnx-c-api, libonnxruntime) come with the package for the publish RID -->
-  <ItemGroup>
+  <ItemGroup Condition="'$(Edition)' != 'Lite'">
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
   </ItemGroup>
 
-  <!-- whisper-server built by scripts/build-mac.sh (Runtime/whisper/* → <output>/whisper/*), not in git -->
-  <ItemGroup>
+  <!-- whisper-server built by scripts/build-mac.sh (Runtime/whisper/* → <output>/whisper/*), not in git; not in Lite -->
+  <ItemGroup Condition="'$(Edition)' != 'Lite'">
     <None Include="Runtime\**\*" Link="%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

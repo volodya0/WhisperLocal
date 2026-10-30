@@ -68,7 +68,8 @@ public interface IAppHost
 
     void CancelDownload(string modelPath);
 
-    void CheckForUpdates();
+    /// <summary>Looks for the newest Full or Lite release and offers to install it (switching edition if it is the other one).</summary>
+    void CheckForUpdates(bool lite);
 
     /// <summary>Opens a file, folder or web address; <paramref name="textEditor"/> forces a text editor.</summary>
     void OpenPath(string path, bool textEditor = false);

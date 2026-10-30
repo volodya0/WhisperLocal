@@ -152,6 +152,9 @@
   // Grammar check after a dictation: a panel proposes a polished version (changes highlighted) to insert or copy
   "Polish": {
     "Enabled": false,
+    // What checks: "Local" (the LocalLlm model), "Gemini" (Cloud.GeminiTextModel) or "Groq" (Cloud.GroqTextModel);
+    // with the cloud, the dictated text is sent there
+    "Engine": "Local",
     "MinWords": 3,
     // Seconds the proposal stays (longer while the mouse is over it)
     "DisplaySeconds": 15,
@@ -168,6 +171,9 @@
     "TranslateTo": "",
     // What translates: "Local" (the LocalLlm model), "Gemini" (Cloud.GeminiTextModel) or "Groq" (Cloud.GroqTextModel)
     "TranslateEngine": "Local",
+    // What recognises the speech: "Local" (the Speech to Text model on this Mac), "Gemini" (Cloud.GeminiModel) or
+    // "Groq" (Cloud.GroqModel); with the cloud, each line's audio is sent there and no text shows while a sentence is spoken
+    "RecognitionEngine": "Local",
     // Also write down what is said into the microphone, as "Me" (an echo of the speakers is left out)
     "IncludeMe": true,
     // Tell the voices of what the Mac plays apart ([1], [2], …) with the voice model from the Models page

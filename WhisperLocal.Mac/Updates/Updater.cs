@@ -30,13 +30,17 @@ internal static class Updater
 
     private static string Arch => RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
 
-    /// <summary>The newest release with a DMG for this Mac's architecture, or null if none is published.</summary>
-    public static Task<Release?> GetLatestAsync(CancellationToken ct) => GitHubReleases.GetLatestAsync($"-{Arch}.dmg", ct);
+    /// <summary>
+    /// The newest release with a DMG of that edition for this Mac's architecture ("-arm64.dmg", Lite "-arm64-lite.dmg"),
+    /// or null if none is published.
+    /// </summary>
+    public static Task<Release?> GetLatestAsync(bool lite, CancellationToken ct) =>
+        GitHubReleases.GetLatestAsync($"-{Arch}{(lite ? "-lite" : "")}.dmg", ct);
 
     public static bool IsNewer(Release release) => GitHubReleases.IsNewer(release);
 
     /// <summary>
-    /// Downloads and installs <paramref name="release"/> over the running bundle, then starts a helper that
+    /// Downloads and installs <paramref name="release"/> (either edition) over the running bundle, then starts a helper that
     /// reopens the app once this process has exited. The caller quits the app right after.
     /// </summary>
     public static async Task InstallAsync(Release release, Action<string> status, CancellationToken ct)

@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
+using WhisperLocal.Config;
 
 namespace WhisperLocal.Updates;
 
@@ -56,6 +57,30 @@ public static class GitHubReleases
     }
 
     public static bool IsNewer(Release release) => release.Version > Normalize(CurrentVersion);
+
+    /// <summary>Worth installing: a newer version of this edition, or the other edition (Full ↔ Lite) in any version.</summary>
+    public static bool IsWorthInstalling(Release release, bool lite) => lite != AppEdition.IsLite || IsNewer(release);
+
+    /// <summary>The question asked before installing: an update of this edition, or a switch to the other one.</summary>
+    public static (string Title, string Message) Describe(Release release, bool lite)
+    {
+        var version = release.Version.ToString(3);
+        if (lite == AppEdition.IsLite)
+        {
+            var notes = release.Notes.Length > 600 ? release.Notes[..600] + "…" : release.Notes;
+            return ($"WhisperLocal {version} is available", $"You have {CurrentVersionText}.\n\n{notes}".TrimEnd());
+        }
+        var speakers = OperatingSystem.IsMacOS() ? ", and telling speakers apart while listening" : "";
+        return lite
+            ? ($"Switch to WhisperLocal Lite {version}?",
+                "Lite is a much smaller app without local models: speech is recognised and translated only with Gemini or Groq, " +
+                $"so it needs a key (Models page); the grammar check uses the cloud too. " +
+                $"{(OperatingSystem.IsMacOS() ? "Autocomplete and telling speakers apart are" : "Autocomplete is")} not in Lite. Downloaded models " +
+                "stay in the data folder for going back to Full; delete them there to free the space.")
+            : ($"Switch to WhisperLocal Full {version}?",
+                $"Full adds recognition on this computer (whisper.cpp), autocomplete and the grammar check with a local language model{speakers}. " +
+                "The models are downloaded on the Models page; your settings and keys stay.");
+    }
 
     /// <summary>Downloads the release's asset to <paramref name="path"/> and checks it against the published checksum.</summary>
     public static async Task DownloadAsync(Release release, string path, CancellationToken ct)

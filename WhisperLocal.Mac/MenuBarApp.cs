@@ -10,6 +10,7 @@ using WhisperLocal.Mac.Interop;
 using WhisperLocal.Mac.Output;
 using WhisperLocal.Mac.Ui;
 using WhisperLocal.Mac.Updates;
+using WhisperLocal.Updates;
 using WhisperLocal.Notes;
 using WhisperLocal.Pipeline;
 using WhisperLocal.Stt;
@@ -77,6 +78,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private bool _microphoneProblemShown; // "listening without your microphone" is said once per run
     private long _systemAudioStartedAt; // Stopwatch timestamps: the microphone's audio is aligned with the system audio's
     private bool _microphoneAligned;
+    private long _microphoneGiven; // bytes of microphone audio given to the listener this session, silence included
+    private Task? _microphoneStart;
     private CancellationTokenSource? _liveCompletion;
     private CancellationTokenSource? _polishRequest;
     private (string Original, string Polished, FrontmostApp? Target, long PastedAt)? _proposal;
@@ -112,8 +115,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _liveAutocomplete = new LiveAutocomplete(config, _stt, _autocompleter);
         _polisher = new Polisher(config, _llama);
         _voiceprints = new Voiceprints(config);
-        _listener = new LiveListener(config, _stt, new Translator(config, _llama), _voiceprints);
-        _listenPanel = new ListenPanel(_ui, StopListening, OpenNotes, ChooseListenLanguage, ListenHint);
+        _listener = new LiveListener(config, new RecognitionRouter(config, _stt, listening: true), new Translator(config, _llama), _voiceprints);
+        _listenPanel = new ListenPanel(_ui, StopListening, OpenNotes, ChooseListenLanguage, SetListenIncludeMe, SetListenSpeakers, ListenHint);
         _listener.Heard += _listenPanel.ShowLine;
         _listener.Finished += OnListenLineFinished;
         _listener.Failed += _listenPanel.ShowProblem;
@@ -128,7 +131,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _menu.AddItem("Open WhisperLocal…", ShowMainWindow);
         _transcriptItem = _menu.AddItem("Show Last Transcript", ShowLastTranscript);
         _listenItem = _menu.AddItem("Listen to System Audio", ToggleListening);
-        _menu.AddItem("Check for Updates…", () => _ = CheckForUpdatesAsync());
+        _menu.AddItem("Check for Updates…", () => _ = CheckForUpdatesAsync(AppEdition.IsLite));
         _menu.AddSeparator();
         _enabledItem = _menu.AddItem("Enabled", ToggleEnabled);
         _unloadItem = _menu.AddItem("Unload from memory", async () => await UnloadFromMemoryAsync());
@@ -172,11 +175,11 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _idleTimer = new System.Threading.Timer(_ => _ui.Post(_ => CheckIdle(), null), null, 30_000, 30_000);
 
         UpdateMenuState();
-        Log.Info($"WhisperLocal {Updater.CurrentVersionText} (macOS) started, config: {_config.FilePath}");
+        Log.Info($"WhisperLocal {Updater.CurrentVersionText} {AppEdition.Name} (macOS) started, config: {_config.FilePath}");
 
         if (_mainWindow.HasProblems)
             ShowMainWindow();
-        else if (config.Current.Whisper.StartOnLaunch && !RecognitionRouter.UsesCloud(config.Current))
+        else if (config.Current.Whisper.StartOnLaunch && !AppEdition.IsLite && !RecognitionRouter.UsesCloud(config.Current))
             _ = WarmUpWhisperAsync();
     }
 
@@ -218,38 +221,66 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             _ => new SetupItem(SetupState.Warning, "Microphone: unknown (asked on the first dictation)"),
         });
 
-        var server = WhisperServerStt.ResolveServerExe(_config.Current.Whisper.ServerExe);
-        items.Add(File.Exists(server)
-            ? new SetupItem(SetupState.Ok, "Speech server: " + Path.GetFileName(server))
-            : new SetupItem(SetupState.Error, "Speech server not found: " + server));
-
-        var model = AppPaths.Resolve(_config.Current.Whisper.ModelPath);
-        var name = Path.GetFileName(model);
-        if (_download is { } download)
-            items.Add(new SetupItem(SetupState.Pending, download.Text, "Cancel", () => download.Cancel.Cancel()));
-        else if (File.Exists(model))
-            items.Add(new SetupItem(SetupState.Ok, $"Model: {name} ({FormatSize(new FileInfo(model).Length)})",
-                "Show Folder", () => Dialogs.Open(Path.GetDirectoryName(model)!)));
+        // What recognises dictation: the provider and the model
+        var cfg = _config.Current;
+        if (AppEdition.IsLite)
+        {
+            // Lite has no speech server or local model: Gemini or Groq recognise
+            items.Add(RecognitionRouter.UsesCloud(cfg)
+                ? new SetupItem(SetupState.Ok, $"Recognition: {RecognitionRouter.Description(cfg)}")
+                : new SetupItem(SetupState.Error, "Add a Gemini or Groq key: Lite recognises speech in the cloud", "Add a Key", _mainWindow.ShowModels));
+        }
         else
-            // With a cloud engine the local model is only the fallback
-            items.Add(new SetupItem(RecognitionRouter.UsesCloud(_config.Current) ? SetupState.Warning : SetupState.Error,
-                $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
+        {
+            var cloud = RecognitionRouter.UsesCloud(cfg);
+            // Shown only when missing (a damaged install): when it is there, the recognition line says the setup is ready
+            var server = WhisperServerStt.ResolveServerExe(cfg.Whisper.ServerExe);
+            if (!File.Exists(server))
+                items.Add(new SetupItem(cloud ? SetupState.Warning : SetupState.Error, "Speech server not found: " + server));
+
+            var model = AppPaths.Resolve(cfg.Whisper.ModelPath);
+            var name = Path.GetFileName(model);
+            if (cloud)
+                items.Add(new SetupItem(SetupState.Ok, $"Recognition: {RecognitionRouter.Description(cfg)}"));
+            if (_download is { } download)
+                items.Add(new SetupItem(SetupState.Pending, download.Text, "Cancel", () => download.Cancel.Cancel()));
+            else if (cloud)
+            {
+                // With a cloud engine the local model is only the fallback
+                if (cfg.Recognition.FallbackToLocal && !File.Exists(model))
+                    items.Add(new SetupItem(SetupState.Warning, $"Fallback model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
+            }
+            else if (File.Exists(model))
+                items.Add(new SetupItem(SetupState.Ok, $"Recognition: {RecognitionRouter.Description(cfg)} ({FormatSize(new FileInfo(model).Length)})",
+                    "Show Folder", () => Dialogs.Open(Path.GetDirectoryName(model)!)));
+            else
+                items.Add(new SetupItem(SetupState.Error, $"Model not downloaded: {name}", "Download", () => _ = DownloadModelAsync(model)));
+        }
 
         var hotkey = HotkeyTap.Describe(_config.Current.Hotkey.Key);
         items.Add(_hotkey.IsInstalled
             ? new SetupItem(SetupState.Ok, $"Hotkey: hold {hotkey} to dictate")
             : new SetupItem(SetupState.Pending, $"Hotkey {hotkey}: waiting for Accessibility"));
 
-        if (SystemAudioTap.IsSupported && _config.Current.Listen.Hotkey.Trim().Length > 0)
-            items.Add(new SetupItem(SetupState.Ok,
-                $"Listening: press {HotkeyTap.Describe(_config.Current.Listen.Hotkey)} to take notes of what the Mac plays"));
+        if (cfg.Polish.Enabled)
+            items.Add(new SetupItem(SetupState.Ok, $"Grammar check: {Polisher.Description(cfg)}"));
+
+        // Note-taking, one line each: its shortcut, what recognises and, with a translation language, what translates
+        if (SystemAudioTap.IsSupported && cfg.Listen.Hotkey.Trim().Length > 0)
+        {
+            items.Add(new SetupItem(SetupState.Ok, $"Notes: press {HotkeyTap.Describe(cfg.Listen.Hotkey)} to take notes of what the Mac plays"));
+            items.Add(new SetupItem(SetupState.Ok, $"Notes recognition: {RecognitionRouter.ListenDescription(cfg)}"));
+            var translateTo = cfg.Listen.TranslateTo.Trim();
+            if (translateTo.Length > 0)
+                items.Add(new SetupItem(SetupState.Ok, $"Notes translation: into {Translator.EnglishName(translateTo)}, {Translator.Description(cfg)}"));
+        }
 
         return items;
     }
 
-    public bool HasGrammarCheck => true;
+    public bool HasGrammarCheck => true; // in Lite with Gemini or Groq
 
-    public bool HasSpeakerSeparation => true;
+    public bool HasSpeakerSeparation => !AppEdition.IsLite;
 
     public IReadOnlyList<SetupItem> GetLanguageModelItems()
     {
@@ -329,7 +360,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (_llama.IsLoaded)
         {
             var name = PlainName(LlmModels.Find(LlamaServer.ResolveModel(cfg.LocalLlm))?.Title) ?? Path.GetFileName(cfg.LocalLlm.ModelPath);
-            var uses = (cfg.Polish.Enabled, IsTranslatingLocally) switch
+            var uses = (IsPolishingLocally, IsTranslatingLocally) switch
             {
                 (true, true) => "Language model: grammar check and translation",
                 (false, true) => "Language model: translation",
@@ -374,7 +405,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         return new[] { _download, _llmDownload, _voiceDownload }.FirstOrDefault(d => d != null && d.Model == model);
     }
 
-    public void CheckForUpdates() => _ = CheckForUpdatesAsync();
+    public void CheckForUpdates(bool lite) => _ = CheckForUpdatesAsync(lite);
 
     public void OpenPath(string path, bool textEditor = false) => Dialogs.Open(path, textEditor);
 
@@ -478,7 +509,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
         // Do not let the user dictate for nothing
         var modelPath = AppPaths.Resolve(cfg.Whisper.ModelPath);
-        if (!File.Exists(modelPath) && !RecognitionRouter.UsesCloud(cfg))
+        if (!AppEdition.IsLite && !File.Exists(modelPath) && !RecognitionRouter.UsesCloud(cfg))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
             ShowModelMissing(new ModelNotFoundException(modelPath));
@@ -553,7 +584,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             await _inserter.InsertAsync(text, _target, cfg.Insert);
             if (cfg.Autocomplete.IsOn)
                 _autocompleter.Remember(_target?.ProcessName, result.FinalText);
-            if (cfg.Polish.Enabled && IsLanguageModelReady)
+            if (cfg.Polish.Enabled && CanPolish)
                 _ = ProposePolishedAsync(result.FinalText, _target, Stopwatch.GetTimestamp());
         }
         catch (Exception ex)
@@ -610,7 +641,13 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     // ---- Language model: autocomplete and grammar check ----
 
     private bool IsLanguageModelWanted =>
-        _config.Current.Autocomplete.IsOn || _config.Current.Polish.Enabled || IsTranslatingLocally;
+        _config.Current.Autocomplete.IsOn || IsPolishingLocally || IsTranslatingLocally;
+
+    /// <summary>The grammar check is on and uses the local model (not Gemini or Groq).</summary>
+    private bool IsPolishingLocally => _config.Current.Polish.Enabled && Polisher.CloudName(_config.Current) == null;
+
+    /// <summary>Something can check grammar: a cloud engine with its key, or the local model installed.</summary>
+    private bool CanPolish => Polisher.CloudName(_config.Current) != null || IsLanguageModelInstalled;
 
     /// <summary>Listening translates, with the local model (not Gemini or Groq).</summary>
     private bool IsTranslatingLocally =>
@@ -795,7 +832,14 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
         var cfg = _config.Current;
         var modelPath = AppPaths.Resolve(cfg.Whisper.ModelPath);
-        if (!File.Exists(modelPath))
+        var cloud = RecognitionRouter.ListenCloudName(cfg);
+        if (cloud == null && AppEdition.IsLite)
+        {
+            Dialogs.Notify("WhisperLocal Lite listens with Gemini or Groq: add a key on the Models page");
+            _mainWindow.ShowModels();
+            return;
+        }
+        if (cloud == null && !File.Exists(modelPath))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
             ShowModelMissing(new ModelNotFoundException(modelPath));
@@ -815,8 +859,11 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
         _systemAudioStartedAt = Stopwatch.GetTimestamp();
         _microphoneAligned = false;
+        _microphoneGiven = 0;
+        _listener.IncludeMe = cfg.Listen.IncludeMe;
+        _listener.SeparateSpeakers = cfg.Listen.SeparateSpeakers;
         if (cfg.Listen.IncludeMe)
-            _ = StartListenMicrophoneAsync(cfg.Audio.DeviceName);
+            _microphoneStart = StartListenMicrophoneAsync(cfg.Audio.DeviceName);
 
         // Translation needs a language model; without one the choice waits until it is downloaded (or a key added)
         var language = CanTranslate ? cfg.Listen.TranslateTo.Trim() : "";
@@ -825,11 +872,12 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         var listening = _listening = new CancellationTokenSource();
         _listenStartedAt = Stopwatch.GetTimestamp();
         _lastActivityUtc = DateTime.UtcNow;
-        Log.Info($"Listening started{(cfg.Listen.IncludeMe ? ", with the microphone" : "")}" +
+        Log.Info($"Listening started{(cloud != null ? $", recognising with {cloud}" : "")}{(cfg.Listen.IncludeMe ? ", with the microphone" : "")}" +
                  $"{(language.Length > 0 ? $", translating into {language}" : "")}");
-        _listenPanel.Show(cfg.Listen.Languages, language);
+        _listenPanel.Show(cfg.Listen.Languages, language, cfg.Listen.IncludeMe, cfg.Listen.SeparateSpeakers && _voiceprints.IsAvailable);
         UpdateMenuState();
-        _ = WarmUpWhisperAsync();
+        if (cloud == null)
+            _ = WarmUpWhisperAsync();
         if (IsTranslatingLocally)
             _ = PreloadLanguageModelAsync();
         _listenTask = RunListeningAsync(listening);
@@ -857,30 +905,35 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             _microphoneProblemShown = true;
             return;
         }
-        // Started only after listening stopped
-        if (_listening == null && _listenMicrophone.IsRecording)
+        // Started only after listening stopped, or after the user was left out
+        if ((_listening == null || !_listener.IncludeMe) && _listenMicrophone.IsRecording)
             await _listenMicrophone.StopAsync();
     }
 
     /// <summary>
-    /// The microphone's audio since the last call; the first audio after it started comes after silence for the time
-    /// since the system audio started, so both are on one timeline (the echo check compares them moment by moment).
+    /// The microphone's audio since the last call; the first audio after it (re)started comes after silence for the
+    /// time it was not recording, so both are on one timeline (the echo check compares them moment by moment).
     /// </summary>
     private byte[] DrainListenMicrophone()
     {
         var pcm = _listenMicrophone.Drain();
-        if (_microphoneAligned || !_listenMicrophone.IsRecording)
-            return pcm;
-        _microphoneAligned = true;
-        var late = Stopwatch.GetElapsedTime(_systemAudioStartedAt, _listenMicrophone.StartedAt);
-        return late <= TimeSpan.Zero ? pcm : [.. new byte[AudioConvert.Bytes((int)late.TotalMilliseconds)], .. pcm];
+        if (!_microphoneAligned && _listenMicrophone.IsRecording)
+        {
+            _microphoneAligned = true;
+            var late = Stopwatch.GetElapsedTime(_systemAudioStartedAt, _listenMicrophone.StartedAt);
+            var gap = late <= TimeSpan.Zero ? 0 : AudioConvert.Bytes((int)late.TotalMilliseconds) - _microphoneGiven;
+            if (gap > 0)
+                pcm = [.. new byte[gap], .. pcm];
+        }
+        _microphoneGiven += pcm.Length;
+        return pcm;
     }
 
     private async Task RunListeningAsync(CancellationTokenSource listening)
     {
         try
         {
-            await _listener.RunAsync(_systemAudio.Drain, _config.Current.Listen.IncludeMe ? DrainListenMicrophone : null, listening.Token);
+            await _listener.RunAsync(_systemAudio.Drain, DrainListenMicrophone, listening.Token);
         }
         catch (Exception ex)
         {
@@ -961,6 +1014,55 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             Log.Warn($"Cannot remember the translation language: {ex.Message}");
         }
         return true;
+    }
+
+    /// <summary>
+    /// The indicator's Me switch: the microphone starts or stops now, and the choice is remembered for the next time
+    /// (Listen.IncludeMe).
+    /// </summary>
+    private bool SetListenIncludeMe(bool on)
+    {
+        _listener.IncludeMe = on;
+        if (on && _listening != null && !_listenMicrophone.IsRecording && _microphoneStart is not { IsCompleted: false })
+        {
+            _microphoneAligned = false;
+            _microphoneStart = StartListenMicrophoneAsync(_config.Current.Audio.DeviceName);
+        }
+        else if (!on && _listenMicrophone.IsRecording)
+            _ = _listenMicrophone.StopAsync();
+        Log.Info(on ? "Listening: with the microphone" : "Listening: without the microphone");
+        RememberListen("IncludeMe", on);
+        return true;
+    }
+
+    /// <summary>
+    /// The indicator's Speakers switch: applies from the next line on, and is remembered for the next time
+    /// (Listen.SeparateSpeakers). Telling them apart needs the voice model.
+    /// </summary>
+    private bool SetListenSpeakers(bool on)
+    {
+        if (on && !_voiceprints.IsAvailable)
+        {
+            Dialogs.Notify("Telling speakers apart needs the voice model: download it on the Models page (Speaker separation)");
+            _mainWindow.ShowModels();
+            return false;
+        }
+        _listener.SeparateSpeakers = on;
+        Log.Info(on ? "Listening: telling speakers apart" : "Listening: speakers not told apart");
+        RememberListen("SeparateSpeakers", on);
+        return true;
+    }
+
+    private void RememberListen(string property, bool value)
+    {
+        try
+        {
+            ConfigEditor.SetValue(_config.FilePath, "Listen", property, value);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Cannot remember Listen.{property}: {ex.Message}");
+        }
     }
 
     /// <summary>While nothing was heard for a few seconds: most likely System Audio Recording is not allowed.</summary>
@@ -1120,8 +1222,11 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         return false;
     }
 
-    /// <summary>Manual update check (never automatic): asks before downloading and installing.</summary>
-    private async Task CheckForUpdatesAsync()
+    /// <summary>
+    /// Manual update check (never automatic) of the Full or the Lite edition: asks before downloading and installing; the
+    /// other edition than this one is offered in any version (a switch).
+    /// </summary>
+    private async Task CheckForUpdatesAsync(bool lite)
     {
         if (_checkingForUpdates)
             return;
@@ -1135,17 +1240,20 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _checkingForUpdates = true;
         try
         {
-            var release = await Updater.GetLatestAsync(CancellationToken.None);
-            if (release == null || !Updater.IsNewer(release))
+            var release = await Updater.GetLatestAsync(lite, CancellationToken.None);
+            if (release == null && lite != AppEdition.IsLite)
             {
-                Dialogs.Show("You're up to date", $"WhisperLocal {Updater.CurrentVersionText} is the latest version.", Dialogs.Style.Informational);
+                Dialogs.Show("Not published yet", $"No release has the {(lite ? "Lite" : "Full")} edition for this Mac yet.", Dialogs.Style.Informational);
+                return;
+            }
+            if (release == null || !GitHubReleases.IsWorthInstalling(release, lite))
+            {
+                Dialogs.Show("You're up to date", $"WhisperLocal {Updater.CurrentVersionText} {AppEdition.Name} is the latest version.", Dialogs.Style.Informational);
                 return;
             }
 
-            var version = release.Version.ToString(3);
-            var notes = release.Notes.Length > 600 ? release.Notes[..600] + "…" : release.Notes;
-            if (!Dialogs.Ask($"WhisperLocal {version} is available", $"You have {Updater.CurrentVersionText}.\n\n{notes}".TrimEnd(),
-                    "Install and Restart", "Later"))
+            var (title, message) = GitHubReleases.Describe(release, lite);
+            if (!Dialogs.Ask(title, message, "Install and Restart", "Later"))
                 return;
             if (_state != State.Idle)
             {
@@ -1153,7 +1261,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
                 return;
             }
 
-            Log.Info($"Installing update {release.Tag}");
+            Log.Info($"Installing update {release.Tag} ({(lite ? "Lite" : "Full")})");
             // Download, hdiutil and ditto take a while: keep the main thread free
             await Task.Run(() => Updater.InstallAsync(release, Dialogs.Notify, CancellationToken.None));
             ExitApp();

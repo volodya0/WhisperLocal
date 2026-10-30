@@ -33,6 +33,11 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
   </ItemGroup>
 
+  <!-- Lite (-p:Edition=Lite): no whisper.cpp runtime; speech is recognised with Gemini or Groq (see AppEdition) -->
+  <ItemGroup Condition="'$(Edition)' == 'Lite'">
+    <AssemblyMetadata Include="Edition" Value="Lite" />
+  </ItemGroup>
+
   <!-- Where "Check for Updates" looks: owner/repo of the GitHub releases (CI passes -p:UpdateRepository) -->
   <ItemGroup Condition="'$(UpdateRepository)' != ''">
     <AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" />
@@ -43,8 +48,8 @@
     <ProjectReference Include="..\WhisperLocal.Ui\WhisperLocal.Ui.csproj" />
   </ItemGroup>
 
-  <!-- Bundled native runtimes (Runtime\whisper\* → <output>\whisper\*) -->
-  <ItemGroup>
+  <!-- Bundled native runtimes (Runtime\whisper\* → <output>\whisper\*); not in Lite -->
+  <ItemGroup Condition="'$(Edition)' != 'Lite'">
     <None Include="Runtime\**\*" Exclude="Runtime\**\whisper-bench.exe" Link="%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

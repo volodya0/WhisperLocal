@@ -280,6 +280,13 @@ public sealed class PolishConfig
 {
     public bool Enabled { get; set; } = false;
 
+    /// <summary>
+    /// What checks: "Local" (the LocalLlm model, the default), "Gemini" (Cloud.GeminiTextModel) or "Groq"
+    /// (Cloud.GroqTextModel, the same text models translation uses); the dictated text is then sent there. A cloud
+    /// engine without its key checks locally.
+    /// </summary>
+    public string Engine { get; set; } = "Local";
+
     /// <summary>Shorter dictations are not checked.</summary>
     public int MinWords { get; set; } = 3;
 
@@ -288,7 +295,7 @@ public sealed class PolishConfig
 
     public double Temperature { get; set; } = 0.2;
 
-    /// <summary>Timeout once the model is loaded; a late proposal is dropped.</summary>
+    /// <summary>Timeout once the model is loaded (or of the cloud request); a late proposal is dropped.</summary>
     public int TimeoutMs { get; set; } = 15000;
 
     public string SystemPrompt { get; set; } = DefaultPrompts.Polish;
@@ -315,6 +322,14 @@ public sealed class ListenConfig
     /// (Cloud.GeminiTextModel) or "Groq" (Cloud.GroqTextModel); a cloud engine without its key translates locally.
     /// </summary>
     public string TranslateEngine { get; set; } = "Local";
+
+    /// <summary>
+    /// What recognises the speech: "Local" (the Whisper model on this computer set in Speech to Text, Whisper.ModelPath),
+    /// "Gemini" (Cloud.GeminiModel) or "Groq" (Cloud.GroqModel); the audio of each line is then sent there, and the
+    /// text so far of the sentence being spoken is not shown (to stay within the provider's limits). A cloud engine
+    /// without its key recognises locally.
+    /// </summary>
+    public string RecognitionEngine { get; set; } = "Local";
 
     /// <summary>
     /// Also write down what is said into the microphone, as "Me"; what the Mac plays is everyone else. Without

@@ -32,6 +32,34 @@ internal static class Widgets
         return row;
     }
 
+    /// <summary>
+    /// Labelled controls as a table: the labels in one column, the controls lined up in the next, one per row. An empty
+    /// label puts the control (e.g. a note) under the previous one, in the controls' column.
+    /// </summary>
+    public static Grid Table(params (string Label, Control Control)[] rows)
+    {
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        foreach (var (label, control) in rows)
+        {
+            var row = grid.RowDefinitions.Count;
+            grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            if (label.Length > 0)
+            {
+                var text = DarkTheme.Label(label);
+                text.VerticalAlignment = VerticalAlignment.Center;
+                text.Margin = new Thickness(0, 2, 12, 2);
+                Grid.SetRow(text, row);
+                grid.Children.Add(text);
+            }
+            control.HorizontalAlignment = HorizontalAlignment.Left;
+            control.Margin = new Thickness(0, 2, 0, 2);
+            Grid.SetRow(control, row);
+            Grid.SetColumn(control, 1);
+            grid.Children.Add(control);
+        }
+        return grid;
+    }
+
     /// <summary>Buttons in a row with the usual gap, wrapping when narrow.</summary>
     public static WrapPanel Buttons(params Control[] buttons)
     {
@@ -116,6 +144,8 @@ internal static class Widgets
         try
         {
             ConfigEditor.SetValue(host.Config.FilePath, section, property, value);
+            // Applied, and shown by the pages, now rather than when the file watcher notices
+            host.Config.ReloadNow();
         }
         catch (Exception ex)
         {
