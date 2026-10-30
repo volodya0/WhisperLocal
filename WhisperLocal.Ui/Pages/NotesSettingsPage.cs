@@ -49,7 +49,7 @@ internal sealed class NotesSettingsPage : Page
     private readonly Note _listenNote = new();
     private readonly TextBlock _speechModel = DarkTheme.MutedLabel("", 11);
     private readonly CheckBox _includeMe = DarkTheme.CheckBox("Include me: write down what I say into the microphone, as \"Me\"");
-    private readonly CheckBox _separateSpeakers = DarkTheme.CheckBox("Tell the other speakers apart (Speaker 1, 2, …), each in its own color");
+    private readonly CheckBox _separateSpeakers = DarkTheme.CheckBox("Tell the other speakers apart ([1], [2], …), each in its own color");
     private readonly TextBlock _voiceMissing = DarkTheme.Label("", 12, brush: DarkTheme.Warning);
     private readonly Grid _voiceMissingRow = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
     private bool? _shownIncludeMe;

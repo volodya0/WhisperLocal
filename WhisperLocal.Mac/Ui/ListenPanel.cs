@@ -324,9 +324,7 @@ internal sealed class ListenPanel : IDisposable
             var line = _lines[i];
             var row = RowAt(placed.Count);
             var color = SpeakerColor(line);
-            // The speaker's name where the speaker changes; the color tells the lines after it apart
-            var named = line.SpeakerName != null && (i == 0 || _lines[i - 1].SpeakerName != line.SpeakerName);
-            SetText(row.Original, named ? $"{line.SpeakerName}: {line.Text}" : line.Text, color);
+            SetText(row.Original, line.SpeakerName != null ? $"{line.SpeakerName} {line.Text}" : line.Text, color);
             var height = Measure(row.Original, column);
             if (twoColumns)
             {

@@ -23,7 +23,7 @@ public sealed class ListenLine(TimeSpan at, string text, int? speaker = null, st
     /// <summary>0 for the user (the microphone), 1, 2, … for the speakers told apart; null for "Them" or no speakers.</summary>
     public int? Speaker { get; } = speaker;
 
-    /// <summary>"Me", "Them" or "Speaker 1", …; null when speakers are not told apart.</summary>
+    /// <summary>The short label in front of the line: "[Me]", "[Them]" or "[1]", "[2]", …; null when speakers are not told apart.</summary>
     public string? SpeakerName { get; } = speakerName;
 
     public string? Translation { get; set; }
@@ -134,9 +134,11 @@ public sealed class LiveListener
     /// The events are raised on the caller's context.
     /// </summary>
     /// <param name="drainSystem">What the Mac played since the previous call, 16 kHz mono 16-bit PCM.</param>
-    /// <param name="drainMicrophone">The same for the microphone; null to leave the user out.</param>
-    /// <param name="microphoneDelay">How much later than the system audio the microphone started.</param>
-    public async Task RunAsync(Func<byte[]> drainSystem, Func<byte[]>? drainMicrophone, CancellationToken ct, TimeSpan microphoneDelay = default)
+    /// <param name="drainMicrophone">
+    /// The same for the microphone, on the system audio's timeline (silence for the time it took to start); null to
+    /// leave the user out.
+    /// </param>
+    public async Task RunAsync(Func<byte[]> drainSystem, Func<byte[]>? drainMicrophone, CancellationToken ct)
     {
         var cfg = _config.Current;
         _previous = "";
@@ -146,7 +148,7 @@ public sealed class LiveListener
         _provisionalToTranslate = null;
         _captures = [new Capture(ListenSource.System, drainSystem) { Generation = _nextGeneration++ }];
         if (drainMicrophone != null)
-            _captures.Add(new Capture(ListenSource.Microphone, drainMicrophone) { Generation = _nextGeneration++, BufferAt = microphoneDelay });
+            _captures.Add(new Capture(ListenSource.Microphone, drainMicrophone) { Generation = _nextGeneration++ });
         _clusters = cfg.Listen.SeparateSpeakers && _voiceprints is { IsAvailable: true } ? new SpeakerClusters(cfg.Listen.SpeakerThreshold) : null;
         _lastOther = 1;
         _echo = new EchoFilter();
@@ -523,9 +525,9 @@ public sealed class LiveListener
         if (_captures.Count == 1 && _clusters == null)
             return (null, null);
         if (segment.Source == ListenSource.Microphone)
-            return (Me, "Me");
+            return (Me, "[Me]");
         if (_clusters == null)
-            return (null, "Them");
+            return (null, "[Them]");
         try
         {
             var sample = segment.Pcm.Length <= AudioConvert.Bytes(VoiceSampleMs)
@@ -538,7 +540,7 @@ public sealed class LiveListener
         {
             Log.Warn($"Listening: voiceprint failed: {ex.Message}");
         }
-        return (_lastOther, $"Speaker {_lastOther}");
+        return (_lastOther, $"[{_lastOther}]");
     }
 
     /// <summary>

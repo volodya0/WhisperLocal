@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix (macOS): dictation was pasted twice in Chrome. The paste is now a full Command press (Command down, V,
+  Command up), the way a keyboard sends it, instead of a lone V carrying the Command flag.
+- Listening: speakers are short labels in front of each line, **[Me]**, **[1]**, **[2]**, … (**[Them]** when not told
+  apart). The note always has the translation column, so a language chosen later from the panel's menu still goes
+  beside the text.
+- Fix: listening with **Include me** could hang the app for good when it started (seen with 1.0.42): starting
+  the microphone waited on Core Audio while the system audio capture had to restart, e.g. with Bluetooth headphones
+  switching to their microphone. The microphone now starts in the background; listening goes on meanwhile.
 - Listening tells who said what. **Include me** (Notes & Translate → Listening, on by default, `Listen.IncludeMe`)
   writes down what you say into the microphone too, as **Me** in green; without headphones, lines that are only the
   speakers' echo are left out (their loudness follows the system audio, or their words repeat its line). **Tell the

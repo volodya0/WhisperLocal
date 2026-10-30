@@ -124,12 +124,12 @@ speaking** on, the sentence still being spoken is translated too, greyed, and th
 language you pick is remembered.
 
 **Who said what.** With **Include me** (on by default), what you say into the microphone is written down too, as
-**Me**, in green. Without headphones the microphone also hears the speakers: those lines are recognised as an echo and
+**[Me]**, in green. Without headphones the microphone also hears the speakers: those lines are recognised as an echo and
 left out (headphones work best when you talk over the others). With **Tell the other speakers apart** (also on, once
-the 28 MB voice model is downloaded on the **Models** page), the voices the Mac plays become **Speaker 1**, **2**, …,
+the 28 MB voice model is downloaded on the **Models** page), the voices the Mac plays become **[1]**, **[2]**, …,
 each in its own color, and a line is cut where another speaker starts; it works for any language. It compares how the
 voices sound, so two similar voices or people talking over each other can get mixed up. Off, everyone the Mac plays
-is **Them**. Both checkboxes are on the **Notes & Translate** page.
+is **[Them]**. Both checkboxes are on the **Notes & Translate** page.
 
 The panel stays until you click its **stop** button (pressing the shortcut again only brings it back); the folder
 button opens the note. Each session is a note in your notes folder, so it is on the **Notes** page, laid out like

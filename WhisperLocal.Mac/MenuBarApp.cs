@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
+using WhisperLocal.Audio;
 using WhisperLocal.Config;
 using WhisperLocal.Llm;
 using WhisperLocal.Mac.Audio;
@@ -74,7 +75,8 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private Download? _llmDownload;
     private Download? _voiceDownload;
     private bool _microphoneProblemShown; // "listening without your microphone" is said once per run
-    private TimeSpan _microphoneDelay; // how much later than the system audio the microphone started
+    private long _systemAudioStartedAt; // Stopwatch timestamps: the microphone's audio is aligned with the system audio's
+    private bool _microphoneAligned;
     private CancellationTokenSource? _liveCompletion;
     private CancellationTokenSource? _polishRequest;
     private (string Original, string Polished, FrontmostApp? Target, long PastedAt)? _proposal;
@@ -811,32 +813,19 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             return;
         }
 
-        // The user as "Me": without the microphone (denied, no device), listening goes on with what the Mac plays
-        var systemStarted = Stopwatch.GetTimestamp();
+        _systemAudioStartedAt = Stopwatch.GetTimestamp();
+        _microphoneAligned = false;
         if (cfg.Listen.IncludeMe)
-        {
-            try
-            {
-                _listenMicrophone.Start(cfg.Audio.DeviceName, 0);
-                _microphoneDelay = Stopwatch.GetElapsedTime(systemStarted);
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"Listening without the microphone: {ex.Message}");
-                if (!_microphoneProblemShown)
-                    Dialogs.Notify($"Listening without your microphone: {ex.Message}");
-                _microphoneProblemShown = true;
-            }
-        }
+            _ = StartListenMicrophoneAsync(cfg.Audio.DeviceName);
 
         // Translation needs a language model; without one the choice waits until it is downloaded (or a key added)
         var language = CanTranslate ? cfg.Listen.TranslateTo.Trim() : "";
         _listener.TranslateTo = language;
-        _notes = new ListenNotes(NotesFolder, cfg.Notes.Extension, language.Length > 0);
+        _notes = new ListenNotes(NotesFolder, cfg.Notes.Extension);
         var listening = _listening = new CancellationTokenSource();
         _listenStartedAt = Stopwatch.GetTimestamp();
         _lastActivityUtc = DateTime.UtcNow;
-        Log.Info($"Listening started{(_listenMicrophone.IsRecording ? ", with the microphone" : "")}" +
+        Log.Info($"Listening started{(cfg.Listen.IncludeMe ? ", with the microphone" : "")}" +
                  $"{(language.Length > 0 ? $", translating into {language}" : "")}");
         _listenPanel.Show(cfg.Listen.Languages, language);
         UpdateMenuState();
@@ -846,12 +835,52 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _listenTask = RunListeningAsync(listening);
     }
 
+    /// <summary>
+    /// The user as "Me". Started off the main thread: starting a device can wait on Core Audio, with Bluetooth
+    /// headphones switching to their microphone even forever (the running system audio capture has to restart);
+    /// listening goes on meanwhile, and without the microphone if it cannot start (denied, no device).
+    /// </summary>
+    private async Task StartListenMicrophoneAsync(string deviceName)
+    {
+        var start = Task.Run(() => _listenMicrophone.Start(deviceName, 0));
+        if (await Task.WhenAny(start, Task.Delay(TimeSpan.FromSeconds(5))) != start)
+            Log.Warn("Listening: the microphone has not started after 5 s");
+        try
+        {
+            await start;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Listening without the microphone: {ex.Message}");
+            if (!_microphoneProblemShown)
+                Dialogs.Notify($"Listening without your microphone: {ex.Message}");
+            _microphoneProblemShown = true;
+            return;
+        }
+        // Started only after listening stopped
+        if (_listening == null && _listenMicrophone.IsRecording)
+            await _listenMicrophone.StopAsync();
+    }
+
+    /// <summary>
+    /// The microphone's audio since the last call; the first audio after it started comes after silence for the time
+    /// since the system audio started, so both are on one timeline (the echo check compares them moment by moment).
+    /// </summary>
+    private byte[] DrainListenMicrophone()
+    {
+        var pcm = _listenMicrophone.Drain();
+        if (_microphoneAligned || !_listenMicrophone.IsRecording)
+            return pcm;
+        _microphoneAligned = true;
+        var late = Stopwatch.GetElapsedTime(_systemAudioStartedAt, _listenMicrophone.StartedAt);
+        return late <= TimeSpan.Zero ? pcm : [.. new byte[AudioConvert.Bytes((int)late.TotalMilliseconds)], .. pcm];
+    }
+
     private async Task RunListeningAsync(CancellationTokenSource listening)
     {
         try
         {
-            await _listener.RunAsync(_systemAudio.Drain, _listenMicrophone.IsRecording ? _listenMicrophone.Drain : null, listening.Token,
-                _microphoneDelay);
+            await _listener.RunAsync(_systemAudio.Drain, _config.Current.Listen.IncludeMe ? DrainListenMicrophone : null, listening.Token);
         }
         catch (Exception ex)
         {

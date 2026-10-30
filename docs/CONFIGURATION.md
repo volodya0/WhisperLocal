@@ -103,7 +103,7 @@ CPU; `-ng` runs on the CPU only.
 | `Listen.TranslateTo` | Translate into this language (`"uk"`, `"en"`, …), `""` for the original only. Set from the indicator's menu. |
 | `Listen.TranslateEngine` | What translates: `"Local"` (the `LocalLlm` model, the default), `"Gemini"` (`Cloud.GeminiTextModel`) or `"Groq"` (`Cloud.GroqTextModel`); the text of each line is then sent there. Without that provider's key, the local model translates. Chosen with Notes & Translate → Translation model. |
 | `Listen.IncludeMe` | Also write down what is said into the microphone (`Audio.DeviceName`), as "Me", recognised in `Whisper.Language` (default `true`). An echo of the speakers is left out. |
-| `Listen.SeparateSpeakers` | Tell the voices of what the Mac plays apart (Speaker 1, 2, …) with the voice model, cutting a line where another speaker starts (default `true`; needs `Listen.VoiceModelPath` downloaded). Off: everyone is "Them". |
+| `Listen.SeparateSpeakers` | Tell the voices of what the Mac plays apart ([1], [2], …) with the voice model, cutting a line where another speaker starts (default `true`; needs `Listen.VoiceModelPath` downloaded). Off: everyone is "Them". |
 | `Listen.VoiceModelPath` | The voice model (speaker embeddings, ONNX) for `Listen.SeparateSpeakers`, relative to the data folder; default `models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx` (CAM++, downloaded on the Models page). |
 | `Listen.SpeakerThreshold` | How alike two voices must sound (cosine similarity, 0–1) to be the same speaker, and below which a line is cut (default `0.6`). Higher tells similar voices apart but may split one person in two. |
 | `Listen.Languages` | The languages the indicator's menu offers. |

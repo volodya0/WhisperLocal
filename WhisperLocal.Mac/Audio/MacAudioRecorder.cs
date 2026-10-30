@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using WhisperLocal.Mac.Interop;
 using static WhisperLocal.Mac.Interop.MacNative;
@@ -30,7 +31,10 @@ internal sealed unsafe class MacAudioRecorder : IDisposable
         public volatile bool Stopping;
     }
 
-    private Session? _session;
+    private volatile Session? _session; // set by Start, which may run off the main thread
+
+    /// <summary>When the last recording started (Stopwatch timestamp).</summary>
+    public long StartedAt { get; private set; }
 
     /// <summary>Raised on the audio thread when MaxDurationSec is reached.</summary>
     public event Action? MaxDurationReached;
@@ -72,6 +76,7 @@ internal sealed unsafe class MacAudioRecorder : IDisposable
                 Check(AudioQueueEnqueueBuffer(session.Queue, buffer, 0, IntPtr.Zero), "AudioQueueEnqueueBuffer");
             }
             Check(AudioQueueStart(session.Queue, IntPtr.Zero), "AudioQueueStart");
+            StartedAt = Stopwatch.GetTimestamp();
             _session = session;
             Log.Debug($"Recording started: '{device}', 16 kHz mono");
         }

@@ -13,7 +13,7 @@ public static class VoiceModels
     public static VoiceModel Default { get; } = new("CAM++ (3D-Speaker)", "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
         "28 MB", "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2",
-        "Tells the voices in what the Mac plays apart while listening (Speaker 1, 2, …); works for any language.");
+        "Tells the voices in what the Mac plays apart while listening ([1], [2], …); works for any language.");
 
     /// <summary>Cosine similarity from which two voiceprints count as the same speaker, for <see cref="Default"/>.</summary>
     public const double DefaultThreshold = 0.6;
