@@ -515,6 +515,13 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             ShowModelMissing(new ModelNotFoundException(modelPath));
             return;
         }
+        // Lite without a cloud key: say so now, not after the recording fails
+        if (AppEdition.IsLite && !RecognitionRouter.UsesCloud(cfg))
+        {
+            Dialogs.Notify("WhisperLocal Lite recognises speech with Gemini or Groq: add a key on the Models page");
+            _mainWindow.ShowModels();
+            return;
+        }
 
         _target = FrontmostApp.Capture();
         try
@@ -1324,7 +1331,15 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private void ExitApp()
     {
         Log.Info("WhisperLocal exiting");
-        Dispose();
+        // Quitting always quits: after an update the bundle is already replaced, and cleaning up may fail there
+        try
+        {
+            Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Cleaning up on exit failed", ex);
+        }
         _desktop.Shutdown();
     }
 

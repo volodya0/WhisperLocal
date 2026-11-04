@@ -47,12 +47,15 @@ internal static class Updater
             if (!File.Exists(Path.Combine(unpacked, Path.GetFileName(exe))))
                 throw new InvalidDataException("The update does not contain WhisperLocal.exe.");
 
-            // config.json holds the user's settings; the defaults in the zip must not replace it
+            // config.json holds the user's settings; the defaults in the zip must not replace it. The script is
+            // UTF-8 and cmd reads it in the console code page: chcp first, or a non-Latin folder name (e.g. a Cyrillic
+            // user name) breaks the paths
             var cleanup = lite ? $"rmdir /s /q \"{Path.Combine(appDir, "whisper")}\" 2>nul" : "";
             var script = Path.Combine(Path.GetTempPath(), $"whisperlocal-update-{Guid.NewGuid():N}.cmd");
             File.WriteAllText(script,
                 $"""
                 @echo off
+                chcp 65001 >nul
                 :wait
                 tasklist /FI "PID eq {Environment.ProcessId}" 2>nul | find "{Environment.ProcessId}" >nul && (timeout /t 1 /nobreak >nul & goto wait)
                 robocopy "{unpacked}" "{appDir}" /E /XF config.json /R:10 /W:1 /NFL /NDL /NJH /NJS /NP >nul

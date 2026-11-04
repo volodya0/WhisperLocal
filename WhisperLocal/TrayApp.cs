@@ -85,7 +85,8 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         openItem.Font = new Font(openItem.Font, FontStyle.Bold); // the double-click action
         _transcriptItem = new ToolStripMenuItem("Show Last Transcript", null, (_, _) => ShowLastTranscript());
         _enabledItem = new ToolStripMenuItem("Enabled", null, (_, _) => ToggleEnabled()) { Checked = true };
-        _unloadItem = new ToolStripMenuItem("Unload from memory", null, async (_, _) => await UnloadFromMemoryAsync());
+        // Lite has no local model to unload
+        _unloadItem = new ToolStripMenuItem("Unload from memory", null, async (_, _) => await UnloadFromMemoryAsync()) { Visible = !AppEdition.IsLite };
         var menu = new ContextMenuStrip();
         menu.Items.AddRange(
         [
@@ -349,6 +350,13 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         {
             Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
             ShowModelMissing(new ModelNotFoundException(modelPath));
+            return;
+        }
+        // Lite without a cloud key: say so now, not after the recording fails
+        if (AppEdition.IsLite && !RecognitionRouter.UsesCloud(cfg))
+        {
+            Notify("WhisperLocal Lite recognises speech with Gemini or Groq: add a key on the Models page", ToolTipIcon.Warning);
+            _mainWindow.ShowModels();
             return;
         }
 
