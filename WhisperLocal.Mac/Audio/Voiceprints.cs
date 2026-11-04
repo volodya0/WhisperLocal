@@ -26,6 +26,7 @@ internal sealed class Voiceprints : IVoiceprints, IDisposable
     }
 }
 #else
+using System.Runtime.CompilerServices;
 using SherpaOnnx;
 using WhisperLocal.Audio;
 using WhisperLocal.Config;
@@ -49,7 +50,7 @@ internal sealed class Voiceprints(ConfigManager config) : IVoiceprints, IDisposa
 
     public bool IsAvailable => File.Exists(ModelPath);
 
-    public bool IsLoaded => _extractor != null;
+    public bool IsLoaded => _loaded != null; // not _extractor: see UnloadLocked
 
     private string ModelPath => AppPaths.Resolve(config.Current.Listen.VoiceModelPath);
 
@@ -71,7 +72,7 @@ internal sealed class Voiceprints(ConfigManager config) : IVoiceprints, IDisposa
     private SpeakerEmbeddingExtractor? Load()
     {
         var model = ModelPath;
-        if (_extractor != null && _loaded == model)
+        if (_loaded == model && _extractor != null)
             return _extractor;
         UnloadLocked();
         if (_disposed || !File.Exists(model))
@@ -88,14 +89,26 @@ internal sealed class Voiceprints(ConfigManager config) : IVoiceprints, IDisposa
             UnloadLocked();
     }
 
+    /// <summary>
+    /// Checks <see cref="_loaded"/> (a string) before touching sherpa-onnx: when the model was never loaded, its
+    /// assembly is not either, and must not be now. Quitting after an update to Lite runs this with the bundle already
+    /// replaced, where sherpa-onnx.dll is gone.
+    /// </summary>
     private void UnloadLocked()
     {
-        if (_extractor == null)
+        if (_loaded == null)
             return;
-        _extractor.Dispose();
-        _extractor = null;
+        DisposeExtractor();
         _loaded = null;
         Log.Info("Voice model unloaded");
+    }
+
+    // Separate and not inlined, so sherpa-onnx's types are resolved only when this runs
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void DisposeExtractor()
+    {
+        _extractor?.Dispose();
+        _extractor = null;
     }
 
     public void Dispose()
