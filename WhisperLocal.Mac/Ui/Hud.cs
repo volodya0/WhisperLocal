@@ -4,7 +4,7 @@ using static WhisperLocal.Mac.Interop.ObjC;
 namespace WhisperLocal.Mac.Ui;
 
 /// <summary>
-/// The floating panels (recording indicator, autocomplete, grammar check): non-activating, never take focus, on every desktop and
+/// The floating panels (recording indicator, autocomplete, listening): non-activating, never take focus, on every desktop and
 /// over full-screen apps. That last part works only while the app is an accessory (menu bar) app, so the app never
 /// switches to a regular Dock app.
 /// </summary>
@@ -120,4 +120,18 @@ internal static class Hud
     /// <summary>0 regular, 1 accessory, 2 prohibited.</summary>
     private static long ActivationPolicy() =>
         SendLong(Send(Class("NSApplication"), Sel("sharedApplication")), Sel("activationPolicy"));
+
+    /// <summary>A borderless button with an SF Symbol (macOS 11+), or its title where the symbol is missing.</summary>
+    internal static IntPtr IconButton(string symbol, string title, string tooltip, Action action)
+    {
+        var image = Send(Class("NSImage"), Sel("imageWithSystemSymbolName:accessibilityDescription:"), Str(symbol), Str(title));
+        var button = image != IntPtr.Zero
+            ? Send(Class("NSButton"), Sel("buttonWithImage:target:action:"), image, ActionTarget.Instance, ActionTarget.ActionSelector)
+            : Send(Class("NSButton"), Sel("buttonWithTitle:target:action:"), Str(title), ActionTarget.Instance, ActionTarget.ActionSelector);
+        Retain(button);
+        Send(button, Sel("setTag:"), ActionTarget.Register(action));
+        Send(button, Sel("setBordered:"), false);
+        Send(button, Sel("setToolTip:"), Str(tooltip));
+        return button;
+    }
 }

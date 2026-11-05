@@ -66,6 +66,9 @@ internal sealed class KeyboardHook : IDisposable
 
     public bool SuppressKey { get; set; }
 
+    /// <summary>When a key was last pressed on the keyboard (Environment.TickCount64); keystrokes the app sends do not count.</summary>
+    public long LastKeyDownTicks { get; private set; }
+
     public event Action? HotkeyDown;
     public event Action? HotkeyUp;
 
@@ -157,6 +160,10 @@ internal sealed class KeyboardHook : IDisposable
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
+        if (nCode >= 0 && (int)wParam is WM_KEYDOWN or WM_SYSKEYDOWN &&
+            (Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam).flags & LLKHF_INJECTED) == 0)
+            LastKeyDownTicks = Environment.TickCount64;
+
         if (nCode < 0 || (_keys.Length == 0 && _recordDone == null))
             return CallNextHookEx(_hook, nCode, wParam, lParam);
 

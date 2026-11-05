@@ -19,4 +19,14 @@ internal sealed record FrontmostApp(int ProcessId, string ProcessName, string Bu
             FromStr(Send(app, Sel("localizedName"))) ?? "",
             FromStr(Send(app, Sel("bundleIdentifier"))) ?? "");
     });
+
+    /// <summary>Brings this app to the front (it then focuses the window and field it had); false if it is gone.</summary>
+    public bool Activate() => WithPool(() =>
+    {
+        var app = Send(Class("NSRunningApplication"), Sel("runningApplicationWithProcessIdentifier:"), (long)ProcessId);
+        if (app == IntPtr.Zero)
+            return false;
+        // NSApplicationActivateIgnoringOtherApps
+        return SendBool(app, Sel("activateWithOptions:"), (IntPtr)2);
+    });
 }

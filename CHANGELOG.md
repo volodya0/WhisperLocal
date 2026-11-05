@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Transcript window tools**: the window that the indicator's **Text** button opens can now translate the dictation
+  (**Original** or **Translate: <language>**, with a **Literal**, **Fluent** or **Technical** style), check its
+  **Grammar**, and apply a **Context fix** — replace misheard words with what was meant, judging by the recent
+  dictations. They combine (context fix → grammar → translation); each step's result is kept, so a combination seen
+  before costs no new request. **Reset** goes back to the dictation as said. **Replace** swaps the pasted
+  dictation for the text shown (undo + paste in that app); after typing there it becomes **Paste** (at the cursor). It uses the local language model or
+  Gemini/Groq, and on Windows and Lite any cloud key.
+- The automatic grammar check after each dictation (the proposal panel on macOS, `Polish.Enabled`, `MinWords`,
+  `DisplaySeconds`) is removed: the check is now the transcript window's **Grammar** option.
 - The grammar check can use Gemini or Groq: its **Model** (Speech to Text → Post-processing) lists their text models
   once a key is added (`Polish.Engine`); the text of each dictation is then sent there, and no local model is needed.
   Home shows what checks.

@@ -64,14 +64,6 @@ internal sealed class MacTextInserter
         await InsertAsync(text, target, cfg);
     }
 
-    /// <summary>Puts <paramref name="text"/> on the clipboard (where it stays, unlike a pasted dictation).</summary>
-    public static void Copy(string text) => WithPool(() =>
-    {
-        var pb = Send(Class("NSPasteboard"), Sel("generalPasteboard"));
-        Send(pb, Sel("clearContents"));
-        Send(pb, Sel("setString:forType:"), Str(text), Str(StringType));
-    });
-
     /// <summary>Copies every item and type currently on the general pasteboard.</summary>
     private static List<List<(string Type, byte[] Data)>>? SnapshotPasteboard()
     {

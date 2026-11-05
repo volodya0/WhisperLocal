@@ -53,7 +53,8 @@ When every line is green, the header says *Ready*.
 3. Release. The text is pasted a moment later.
 
 The indicator at the bottom of the screen counts the seconds while recording and processing, then shows a short
-summary. Its **Text** button opens what you said, to edit and copy. If no text field was focused (the desktop, a
+summary. Its **Text** button opens what you said, to edit and copy — and to translate it, check its grammar or fix
+misheard words (see below). If no text field was focused (the desktop, a
 file list), nothing is pasted — the text opens in that window instead.
 
 - A very short tap is ignored, so the hotkey does not fire by accident.
@@ -89,7 +90,7 @@ attention) at the bottom.
     a second without a GPU, but the recording is sent to Groq.
     With a cloud model you can choose whether a failed request (no internet, limit used up) is recognised on this computer,
     with the last local model you chose. Listening uses that same local model.
-  - **Post-processing** — the grammar check (see below) and the correction rules for words Whisper mishears.
+  - **Post-processing** — the model of the transcript window's grammar check (see below) and the correction rules for words Whisper mishears.
 - **Notes & Translate** — which folder holds the notes, and whether new ones are Markdown or plain text; on macOS,
   **Listening** (see below): its shortcut, the language heard, the translation language and the translation model;
   **Line speed** (Fast, Balanced or Accurate: how soon a line ends) and **Translate while speaking** (translate the
@@ -110,13 +111,32 @@ attention) at the bottom.
 Everything else (start at login, which microphone, English terms that get misheard…) is in the config file: see
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md). Changes apply as soon as you save it.
 
-## Grammar check (macOS, optional)
+## Translate, check grammar, fix by context (transcript window)
 
-Turn it on in Speech to Text → Post-processing and download its model on the Models page (Gemma 3 4B, 2.5 GB, is the default). After each dictation, a
-small panel proposes a corrected version with the changed words in green. Its buttons replace what was pasted with
-the corrected text or copy it; or just ignore it — it goes away by itself. It runs locally too, unless you choose
-Gemini or Groq as its **Model** (once a key is added on Models): then the text of each dictation is sent there to be
-checked, with no model to download.
+The transcript window (the indicator's **Text** button, or **Show Last Transcript**) can rework the dictation with a
+language model, only when you ask:
+
+- **Original / Translate: …** — the dictation as said, or translated into one of `Listen.Languages`, in the style
+  chosen next to it: **Literal** (close to the original wording), **Fluent** (natural, as a native speaker would write
+  it) or **Technical** (precise; terms, names and code kept).
+- **Context fix** — replaces words Whisper misheard with what you meant, judging by the text and your recent
+  dictations (names and terms you use often). It needs the history to keep the text (`Logging.LogText`, on by default).
+- **Grammar** — corrects grammar, punctuation and word choice.
+
+They combine in this order: context fix, grammar, translation. Every step's result is kept while the window shows the
+dictation, so a combination you have seen before shows at once; only a new one asks the model, and only for the steps
+it has not done yet. **Reset** goes back to the dictation as it was said. Edit the text as you like and **Copy** what
+is shown.
+
+For the last dictation, **Replace** puts the text shown where the dictation was pasted: the window goes away, that app
+comes to the front, the dictation is undone (⌘Z / Ctrl+Z) and the new text pasted instead. If you typed anything after
+the dictation (or switched to another app while the window was open), undo would hit that, so the button becomes
+**Paste** and inserts the text at the cursor instead.
+
+On macOS it uses the local model (download it on the Models page; Gemma 3 4B, 2.5 GB, is the default), unless you
+choose Gemini or Groq as the grammar check's **Model** in Speech to Text (translation follows Notes & Translate's
+model). Without a local model, any Gemini or Groq key works — that is how it runs on Windows and in Lite. With the
+cloud, the text is sent there.
 
 ## Notes from what the Mac plays (macOS 14.2 or later)
 

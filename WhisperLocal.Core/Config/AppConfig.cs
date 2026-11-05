@@ -273,13 +273,11 @@ public sealed class AutocompleteConfig
 }
 
 /// <summary>
-/// Grammar check after a dictation: the local LLM rewrites the text as correct, natural text in the same language and
-/// a panel proposes it, with the changed words highlighted; Insert replaces the pasted text, Copy copies it.
+/// The transcript window's Grammar and Context fix options: a language model rewrites the dictation as correct,
+/// natural text in the same language, or replaces misheard words judging by the recent dictations.
 /// </summary>
 public sealed class PolishConfig
 {
-    public bool Enabled { get; set; } = false;
-
     /// <summary>
     /// What checks: "Local" (the LocalLlm model, the default), "Gemini" (Cloud.GeminiTextModel) or "Groq"
     /// (Cloud.GroqTextModel, the same text models translation uses); the dictated text is then sent there. A cloud
@@ -287,15 +285,9 @@ public sealed class PolishConfig
     /// </summary>
     public string Engine { get; set; } = "Local";
 
-    /// <summary>Shorter dictations are not checked.</summary>
-    public int MinWords { get; set; } = 3;
-
-    /// <summary>How long the proposal stays (longer while the mouse is over it); the next dictation hides it too.</summary>
-    public double DisplaySeconds { get; set; } = 15;
-
     public double Temperature { get; set; } = 0.2;
 
-    /// <summary>Timeout once the model is loaded (or of the cloud request); a late proposal is dropped.</summary>
+    /// <summary>Timeout once the model is loaded (or of the cloud request).</summary>
     public int TimeoutMs { get; set; } = 15000;
 
     public string SystemPrompt { get; set; } = DefaultPrompts.Polish;

@@ -9,7 +9,7 @@ Hotkey → microphone capture → 16 kHz mono PCM
   → hallucination filter + regex dictionary
   → optional LLM cleanup (Ollama, off by default)
   → clipboard + Ctrl+V / Cmd+V, clipboard restored
-  → optional grammar check proposal (macOS, llama-server)
+  → on request in the transcript window: translate, grammar check, fix by context (llama-server or Gemini/Groq)
 ```
 
 ## Windows

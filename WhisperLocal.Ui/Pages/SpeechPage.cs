@@ -10,8 +10,8 @@ namespace WhisperLocal.Ui.Pages;
 
 /// <summary>
 /// Speech to text settings: the hotkey, recognition (one model chosen from those ready to use: the downloaded local
-/// models and, with an API key, the cloud models; the language) and post-processing (the grammar check and its language
-/// model, the corrections dictionary). Models are downloaded and cloud keys added on the Models page.
+/// models and, with an API key, the cloud models; the language) and post-processing (the language model of the transcript window's
+/// grammar check and fix by context, the corrections dictionary). Models are downloaded and cloud keys added on the Models page.
 /// </summary>
 internal sealed class SpeechPage : Page
 {
@@ -31,12 +31,8 @@ internal sealed class SpeechPage : Page
     private readonly TextBlock _modelProblem = DarkTheme.Label("", 12, brush: DarkTheme.Warning);
     private readonly Grid _modelProblemRow = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
     private readonly Note _recognitionNote = new();
-    private readonly CheckBox _polish = new()
-    {
-        Content = "Grammar check: after each dictation, propose a polished version",
-        FontSize = 13,
-        Foreground = DarkTheme.Text,
-    };
+    private readonly TextBlock _polish = DarkTheme.Label(
+        "Grammar and Context fix: options in the transcript window (the indicator's Text button)", 13);
     private readonly ComboBox _llmModels = DarkTheme.Dropdown(290);
     private readonly Note _polishNote = new();
     private readonly StackPanel _llmStatus = new() { Spacing = 2 };
@@ -52,7 +48,6 @@ internal sealed class SpeechPage : Page
     private bool? _shownFallback;
     private string? _shownLlmModel;
     private string? _shownLlmStatus;
-    private bool? _shownPolish;
     private bool _updating;
     private bool _recording;
 
@@ -115,7 +110,6 @@ internal sealed class SpeechPage : Page
             if (!_updating)
                 Widgets.Save(_host, "Recognition", "FallbackToLocal", _fallback.IsChecked == true, _recognitionNote);
         };
-        _polish.IsCheckedChanged += (_, _) => OnPolishToggled();
         _llmModels.SelectionChanged += (_, _) => OnLlmModelSelected();
     }
 
@@ -407,12 +401,6 @@ internal sealed class SpeechPage : Page
     private void RefreshPolish(AppConfig cfg)
     {
         var model = cfg.LocalLlm.ModelPath;
-        // Only on a change in the config: a click shows at once, the config catches up after the save
-        if (cfg.Polish.Enabled != _shownPolish)
-        {
-            _shownPolish = cfg.Polish.Enabled;
-            _polish.IsChecked = cfg.Polish.Enabled;
-        }
         // The local models and, with a key, the cloud ones (the same choices as translation's)
         var cloud = Polisher.CloudName(cfg);
         var signature = $"{model}|{cfg.Polish.Engine}|{cfg.Cloud.GeminiTextModel}|{cfg.Cloud.GroqTextModel}|" +
@@ -428,23 +416,14 @@ internal sealed class SpeechPage : Page
                 : LlmModels.Find(model)?.Hint ?? "Set in the config (LocalLlm.ModelPath): any instruction-tuned GGUF model.");
         }
 
-        var used = cfg.Polish.Enabled;
-        _llmModels.IsEnabled = used;
         // The local model's state (downloaded, loaded) only while it is the one checking
-        _llmStatus.IsVisible = used && cloud == null;
-        if (used && cloud == null)
+        _llmStatus.IsVisible = cloud == null;
+        if (cloud == null)
             Widgets.RenderItems(_llmStatus, _host.GetLanguageModelItems(), ref _shownLlmStatus, () =>
             {
                 _shownLlmStatus = null;
                 Refresh();
             });
-    }
-
-    private void OnPolishToggled()
-    {
-        if (_updating)
-            return;
-        Widgets.Save(_host, "Polish", "Enabled", _polish.IsChecked == true, _polishNote);
     }
 
     private void OnLlmModelSelected()

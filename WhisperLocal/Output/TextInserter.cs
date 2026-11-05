@@ -26,7 +26,7 @@ internal sealed class TextInserter
         Clipboard.SetDataObject(data, true, 10, 30);
 
         await WaitForModifiersReleasedAsync();
-        SendCtrlV();
+        SendCtrl(VK_V);
 
         if (saved == null)
             return;
@@ -44,6 +44,16 @@ internal sealed class TextInserter
         {
             Log.Warn($"Failed to restore the clipboard: {ex.Message}");
         }
+    }
+
+    /// <summary>Undoes the last paste (Ctrl+Z) and pastes <paramref name="text"/> instead.</summary>
+    public async Task ReplaceLastAsync(string text, ForegroundApp? target, InsertConfig cfg)
+    {
+        await WaitForModifiersReleasedAsync();
+        SendCtrl(VK_Z);
+        // The app applies the undo before it reads the next keystroke, but give it a moment
+        await Task.Delay(80);
+        await InsertAsync(text, target, cfg);
     }
 
     private static DataObject? SnapshotClipboard()
@@ -95,7 +105,7 @@ internal sealed class TextInserter
         }
     }
 
-    private static void SendCtrlV()
+    private static void SendCtrl(ushort key)
     {
         INPUT Key(ushort vk, bool up) => new()
         {
@@ -103,9 +113,9 @@ internal sealed class TextInserter
             U = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = up ? KEYEVENTF_KEYUP : 0 } },
         };
 
-        INPUT[] inputs = [Key(VK_CONTROL, false), Key(VK_V, false), Key(VK_V, true), Key(VK_CONTROL, true)];
+        INPUT[] inputs = [Key(VK_CONTROL, false), Key(key, false), Key(key, true), Key(VK_CONTROL, true)];
         var sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
         if (sent != inputs.Length)
-            Log.Warn($"SendInput sent {sent} of {inputs.Length} events (error {Marshal.GetLastWin32Error()}), the paste was probably blocked");
+            Log.Warn($"SendInput sent {sent} of {inputs.Length} events (error {Marshal.GetLastWin32Error()}), the keystroke was probably blocked");
     }
 }

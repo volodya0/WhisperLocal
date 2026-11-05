@@ -42,6 +42,7 @@ internal static class NativeMethods
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const ushort VK_CONTROL = 0x11;
     public const ushort VK_V = 0x56;
+    public const ushort VK_Z = 0x5A;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct INPUT
@@ -96,6 +97,14 @@ internal static class NativeMethods
     // Foreground window / process info
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);

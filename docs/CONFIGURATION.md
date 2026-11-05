@@ -84,14 +84,12 @@ With several GPUs, the list of Vulkan devices is at the top of `logs\whisper-ser
 index of the one you want into `Whisper.ExtraArgs` as `-dev N`. An integrated GPU is usually much slower than the
 CPU; `-ng` runs on the CPU only.
 
-## Grammar check (macOS)
+## Transcript window: grammar check, fix by context, translation
 
 | Setting | Meaning |
 |---|---|
-| `Polish.Enabled` | Propose a corrected version after each dictation (the checkbox in Speech to Text → Post-processing). |
-| `Polish.Engine` | What checks: `"Local"` (the `LocalLlm` model, the default), `"Gemini"` (`Cloud.GeminiTextModel`) or `"Groq"` (`Cloud.GroqTextModel`, the same text models translation uses); the dictated text is then sent there. Without that provider's key, the local model checks. Chosen with the grammar check's Model in Speech to Text. |
-| `Polish.MinWords` | Shorter dictations are not checked. |
-| `Polish.DisplaySeconds` | How long the proposal stays (longer while the mouse is over it). |
+| `Polish.Engine` | What checks: `"Local"` (the `LocalLlm` model, the default), `"Gemini"` (`Cloud.GeminiTextModel`) or `"Groq"` (`Cloud.GroqTextModel`, the same text models translation uses); the dictated text is then sent there. Without that provider's key, the local model checks. Chosen with the grammar check's Model in Speech to Text. Used by the transcript window's **Grammar** and **Context fix**; its translations use `Listen.TranslateEngine` and `Listen.Languages`. Where no local model is installed (Windows, Lite), any Gemini or Groq key is used. |
+| `Polish.Temperature`, `Polish.TimeoutMs`, `Polish.SystemPrompt` | How the Grammar option asks the model. |
 | `LocalLlm.ModelPath` | The GGUF model, for the grammar check and translation (chosen in Speech to Text or Notes & Translate, downloaded on the Models page; any instruction-tuned GGUF works). |
 | `LocalLlm.ServerExe`, `Port`, `ExtraArgs` | The bundled `llama-server` and how it runs. |
 

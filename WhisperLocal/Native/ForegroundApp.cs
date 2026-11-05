@@ -23,6 +23,9 @@ internal sealed record ForegroundApp(IntPtr Hwnd, uint ProcessId, string Process
         return new ForegroundApp(hwnd, pid, name);
     }
 
+    /// <summary>Brings this window back to the front; false if it is gone or Windows refused.</summary>
+    public bool Activate() => IsWindow(Hwnd) && SetForegroundWindow(Hwnd);
+
     /// <summary>
     /// False when the foreground window is the desktop or the taskbar, where there is nothing to type into;
     /// null otherwise (unknown: the text is pasted). The counterpart of FocusedInput.AcceptsText on macOS.
