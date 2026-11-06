@@ -9,7 +9,7 @@ Hotkey → microphone capture → 16 kHz mono PCM
   → hallucination filter + regex dictionary
   → optional LLM cleanup (Ollama, off by default)
   → clipboard + Ctrl+V / Cmd+V, clipboard restored
-  → optional grammar check proposal (macOS, llama-server)
+  → on request in the transcript window: translate, grammar check, fix by context (llama-server or Gemini/Groq)
 ```
 
 ## Windows
@@ -87,7 +87,7 @@ hide the local models. Windows: `dotnet build WhisperLocal/WhisperLocal.csproj -
 
 `.github/workflows/macos.yml` ("Build") runs on every push to any branch, every pull request and on demand. It
 builds the macOS DMG on GitHub's Mac runners (Apple Silicon) and the Windows app on a Windows runner, runs each app's
-`--self-test`, and keeps the DMG and a zip of the Windows app folder as workflow artifacts. Each is built twice, Full
+`--self-test`, and keeps the DMG and a zip of the Windows app folder as workflow artifacts (for 7 days). Each is built twice, Full
 and Lite; Lite's files end in `-lite` (`-arm64-lite.dmg`, `-windows-x64-lite.zip`), so older apps, which look for
 `-arm64.dmg` and `-windows-x64.zip`, never pick Lite.
 

@@ -127,7 +127,7 @@ internal sealed class ModelsPage : Page
 
     /// <summary>
     /// One catalog model: <paramref name="Path"/> is its config value ("models/…"); <paramref name="Needed"/> when
-    /// the selected model is used now, so a missing one is an error (the grammar check may be off);
+    /// the selected model is used now, so a missing one is an error;
     /// <paramref name="KeepText"/> says why the model in use cannot be deleted (where another one is chosen).
     /// </summary>
     private sealed record ModelRow(string Title, string Size, string Hint, string Path, bool InUse, string InUseText, bool Needed, string? Url,
@@ -158,16 +158,17 @@ internal sealed class ModelsPage : Page
     private void RefreshLlm(AppConfig cfg)
     {
         var current = cfg.LocalLlm.ModelPath;
-        // The grammar check and translation with Gemini or Groq do not use the local model
+        // The transcript window's tools and translation with Gemini or Groq do not use the local model
         var translating = cfg.Listen.TranslateTo.Trim().Length > 0 && Translator.CloudName(cfg) == null;
-        var polishing = cfg.Polish.Enabled && Polisher.CloudName(cfg) == null;
-        var used = polishing || translating;
+        var polishing = Polisher.CloudName(cfg) == null;
+        // Only notes translation needs it for sure: the transcript window falls back to a cloud key without it
+        var used = translating;
         var inUse = (polishing, translating) switch
         {
-            (true, true) => "Used by the grammar check and translation",
-            (true, false) => "Used by the grammar check",
-            (false, true) => "Used for translation",
-            _ => "Selected for the grammar check and translation (neither uses it now)",
+            (true, true) => "Used by the transcript window (grammar, fix, translate) and notes translation",
+            (true, false) => "Used by the transcript window: grammar check, fix by context, translation",
+            (false, true) => "Used for notes translation",
+            _ => "Selected for the transcript window and translation (both use a cloud model now)",
         };
         var rows = LlmModels.Catalog
             .Select(m => new ModelRow(m.Title, m.Size, m.Hint, "models/" + m.File, LlmModels.Find(current) == m, inUse, used, m.Url,

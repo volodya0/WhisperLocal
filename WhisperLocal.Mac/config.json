@@ -149,15 +149,11 @@
     "ExtraArgs": "-c 4096 -ngl 99 --no-webui --reasoning off",
     "StartupTimeoutSec": 60
   },
-  // Grammar check after a dictation: a panel proposes a polished version (changes highlighted) to insert or copy
+  // The transcript window's Grammar and Context fix options
   "Polish": {
-    "Enabled": false,
     // What checks: "Local" (the LocalLlm model), "Gemini" (Cloud.GeminiTextModel) or "Groq" (Cloud.GroqTextModel);
     // with the cloud, the dictated text is sent there
     "Engine": "Local",
-    "MinWords": 3,
-    // Seconds the proposal stays (longer while the mouse is over it)
-    "DisplaySeconds": 15,
     "Temperature": 0.2,
     "TimeoutMs": 15000
   },

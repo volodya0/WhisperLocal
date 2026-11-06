@@ -113,14 +113,14 @@ internal sealed class ListenPanel : IDisposable
 
         _buttons =
         [
-            PolishPanel.IconButton("folder", "Notes", "Open the notes", openNotes),
-            PolishPanel.IconButton("stop.circle", "Stop", "Stop listening and save the notes", stop),
+            Hud.IconButton("folder", "Notes", "Open the notes", openNotes),
+            Hud.IconButton("stop.circle", "Stop", "Stop listening and save the notes", stop),
         ];
         foreach (var button in _buttons)
             Send(content, Sel("addSubview:"), button);
 
-        _me = PolishPanel.IconButton("mic.fill", "Me", "", OnIncludeMeClicked);
-        _speakers = PolishPanel.IconButton("person.2.fill", "Speakers", "", OnSeparateSpeakersClicked);
+        _me = Hud.IconButton("mic.fill", "Me", "", OnIncludeMeClicked);
+        _speakers = Hud.IconButton("person.2.fill", "Speakers", "", OnSeparateSpeakersClicked);
         Send(content, Sel("addSubview:"), _me);
         Send(content, Sel("addSubview:"), _speakers);
         Send(_speakers, Sel("setHidden:"), AppEdition.IsLite); // Lite has no voice model: the others are all "Them"

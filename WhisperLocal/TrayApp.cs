@@ -49,6 +49,7 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     private DateTime _lastActivityUtc = DateTime.UtcNow;
     private ForegroundApp? _target;
     private string _lastTranscript = "";
+    private (string Text, ForegroundApp Target, long PastedAt)? _lastPaste; // the transcript window's Replace undoes it
     private Download? _download;
     private bool _checkingForUpdates;
     private (string? Name, string? Configured, DateTime At) _microphone;
@@ -77,6 +78,8 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
         _stt = new WhisperServerStt(config);
         _llm = new OllamaCleaner(config);
         _pipeline = new DictationPipeline(config, new RecognitionRouter(config, _stt), _llm);
+        // No local language model on Windows: the transcript window translates and checks with Gemini or Groq
+        _transcriptWindow.Tools = new TranscriptTools(config, null, _history);
         _mainWindow = new MainWindow(this, _transcriptWindow);
         _overlay = new RecordingOverlay(ShowLastTranscript);
 
@@ -296,7 +299,54 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
     private void ShowLastTranscript()
     {
         if (_lastTranscript.Length > 0)
-            _transcriptWindow.ShowText(_lastTranscript);
+            _transcriptWindow.ShowText(_lastTranscript, pasteBack: PasteBackFor(_lastTranscript));
+    }
+
+    /// <summary>
+    /// Replace in the transcript window, when <paramref name="text"/> is the last dictation and it was pasted: undoes
+    /// that paste and pastes the window's text. If a key was pressed since (typing there), undo would hit that, so the
+    /// text is pasted at the cursor instead.
+    /// </summary>
+    private PasteBack? PasteBackFor(string text)
+    {
+        if (_lastPaste is not { } p || p.Text != text)
+            return null;
+        var typedSince = _hook.LastKeyDownTicks > p.PastedAt;
+        var name = p.Target.ProcessName.Length > 0 ? p.Target.ProcessName : "the app";
+        return new PasteBack(name, !typedSince, (newText, replace) => PasteBackAsync(newText, replace, p.Target));
+    }
+
+    private async Task PasteBackAsync(string text, bool replace, ForegroundApp target)
+    {
+        if (_state != State.Idle)
+            return;
+        try
+        {
+            // The transcript window had the focus: give it back to the window the dictation went into
+            if (!target.Activate())
+            {
+                Notify($"Could not switch back to {target.ProcessName}; copy the text instead", ToolTipIcon.Warning);
+                return;
+            }
+            await Task.Delay(150); // the window focuses its text field again
+
+            var cfg = _config.Current;
+            var trimmed = text.Trim();
+            var insert = cfg.Insert.AppendTrailingSpace ? trimmed + " " : trimmed;
+            Log.Info(replace ? "Transcript window: replacing the dictation" : "Transcript window: pasting at the cursor");
+            var pastedAt = Environment.TickCount64;
+            if (replace)
+                await _inserter.ReplaceLastAsync(insert, target, cfg.Insert);
+            else
+                await _inserter.InsertAsync(insert, target, cfg.Insert);
+            // The new text is now the last paste: Replace again replaces it
+            _lastTranscript = trimmed;
+            _lastPaste = (trimmed, target, pastedAt);
+        }
+        catch (Exception ex)
+        {
+            ReportError(replace ? "Replacing the dictation failed" : "Pasting the text failed", ex);
+        }
     }
 
     private void ApplyConfig()
@@ -420,7 +470,12 @@ internal sealed class TrayApp : ApplicationContext, IAppHost
             }
 
             var text = cfg.Insert.AppendTrailingSpace ? result.FinalText + " " : result.FinalText;
+            // Where it goes (the foreground window may have changed while processing) and when, for the transcript's
+            // Replace; taken before the paste, as InsertAsync returns only after restoring the clipboard and a key
+            // pressed meanwhile is typing after the dictation
+            var pasted = (result.FinalText.Trim(), ForegroundApp.Capture(), Environment.TickCount64);
             await _inserter.InsertAsync(text, _target, cfg.Insert);
+            _lastPaste = pasted;
         }
         catch (Exception ex)
         {

@@ -125,6 +125,8 @@ jobs:
           name: WhisperLocal-macOS-arm64
           path: artifacts/*.dmg
           if-no-files-found: error
+          # Kept a week (the default is 90 days): the releases keep the downloads, and stored artifacts count as Actions storage
+          retention-days: 7
 
   windows:
     runs-on: windows-latest
@@ -220,6 +222,8 @@ jobs:
           name: WhisperLocal-windows-x64
           path: WhisperLocal-windows-*.zip
           if-no-files-found: error
+          # Kept a week (the default is 90 days): the releases keep the downloads, and stored artifacts count as Actions storage
+          retention-days: 7
 
   release:
     needs: [build, windows]

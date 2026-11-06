@@ -51,7 +51,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private readonly LlamaServer _llama;
     private readonly Autocompleter _autocompleter;
     private readonly LiveAutocomplete _liveAutocomplete;
-    private readonly Polisher _polisher;
     private readonly SystemAudioTap _systemAudio = new();
     private readonly MacAudioRecorder _listenMicrophone = new(); // the user, while listening (dictation has its own)
     private readonly Voiceprints _voiceprints;
@@ -60,7 +59,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private readonly MacTextInserter _inserter = new();
     private readonly RecordingOverlay _overlay;
     private readonly AutocompletePanel _completionPanel;
-    private readonly PolishPanel _polishPanel;
     private readonly TranscriptWindow _transcriptWindow = new();
     private readonly MainWindow _mainWindow;
     private readonly System.Threading.Timer _idleTimer;
@@ -71,6 +69,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private DateTime _lastActivityUtc = DateTime.UtcNow;
     private FrontmostApp? _target;
     private string _lastTranscript = "";
+    private (string Text, FrontmostApp Target, long PastedAt)? _lastPaste; // the transcript window's Replace undoes it
     private bool _checkingForUpdates;
     private Download? _download;
     private Download? _llmDownload;
@@ -81,8 +80,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private long _microphoneGiven; // bytes of microphone audio given to the listener this session, silence included
     private Task? _microphoneStart;
     private CancellationTokenSource? _liveCompletion;
-    private CancellationTokenSource? _polishRequest;
-    private (string Original, string Polished, FrontmostApp? Target, long PastedAt)? _proposal;
     private CancellationTokenSource? _listening;
     private Task? _listenTask;
     private ListenNotes? _notes;
@@ -113,7 +110,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _llama = new LlamaServer(config);
         _autocompleter = new Autocompleter(config, _llama);
         _liveAutocomplete = new LiveAutocomplete(config, _stt, _autocompleter);
-        _polisher = new Polisher(config, _llama);
         _voiceprints = new Voiceprints(config);
         _listener = new LiveListener(config, new RecognitionRouter(config, _stt, listening: true), new Translator(config, _llama), _voiceprints);
         _listenPanel = new ListenPanel(_ui, StopListening, OpenNotes, ChooseListenLanguage, SetListenIncludeMe, SetListenSpeakers, ListenHint);
@@ -124,7 +120,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _listener.ProvisionalTranslation += _listenPanel.ShowProvisionalTranslation;
         _overlay = new RecordingOverlay(_ui, ShowLastTranscript);
         _completionPanel = new AutocompletePanel();
-        _polishPanel = new PolishPanel(_ui, () => _ = InsertProposalAsync(), CopyProposal);
+        _transcriptWindow.Tools = new TranscriptTools(config, _llama, _history);
         _mainWindow = new MainWindow(this, _transcriptWindow);
 
         _menu = new StatusMenu();
@@ -262,9 +258,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             ? new SetupItem(SetupState.Ok, $"Hotkey: hold {hotkey} to dictate")
             : new SetupItem(SetupState.Pending, $"Hotkey {hotkey}: waiting for Accessibility"));
 
-        if (cfg.Polish.Enabled)
-            items.Add(new SetupItem(SetupState.Ok, $"Grammar check: {Polisher.Description(cfg)}"));
-
         // Note-taking, one line each: its shortcut, what recognises and, with a translation language, what translates
         if (SystemAudioTap.IsSupported && cfg.Listen.Hotkey.Trim().Length > 0)
         {
@@ -360,12 +353,7 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (_llama.IsLoaded)
         {
             var name = PlainName(LlmModels.Find(LlamaServer.ResolveModel(cfg.LocalLlm))?.Title) ?? Path.GetFileName(cfg.LocalLlm.ModelPath);
-            var uses = (IsPolishingLocally, IsTranslatingLocally) switch
-            {
-                (true, true) => "Language model: grammar check and translation",
-                (false, true) => "Language model: translation",
-                _ => "Language model: grammar check",
-            };
+            var uses = IsTranslatingLocally ? "Language model: notes translation and the transcript" : "Language model: the transcript (translate, check)";
             loaded.Add((name, uses + (_llama.MemoryBytes is { } bytes ? $" · {FormatSize(bytes)}" : "")));
         }
         if (_voiceprints.IsLoaded)
@@ -428,7 +416,62 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
     private void ShowLastTranscript()
     {
         if (_lastTranscript.Length > 0)
-            _transcriptWindow.ShowText(_lastTranscript);
+            _transcriptWindow.ShowText(_lastTranscript, pasteBack: PasteBackFor(_lastTranscript));
+    }
+
+    /// <summary>
+    /// Replace in the transcript window, when <paramref name="text"/> is the last dictation and it was pasted: undoes
+    /// that paste and pastes the window's text. If a key was pressed since (typing there), undo would hit that, so the
+    /// text is pasted at the cursor instead.
+    /// </summary>
+    private PasteBack? PasteBackFor(string text)
+    {
+        if (_lastPaste is not { } p || p.Text != text)
+            return null;
+        var sinceKey = MacNative.CGEventSourceSecondsSinceLastEventType(MacNative.kCGEventSourceStateHIDSystemState, MacNative.kCGEventKeyDown);
+        var typedSince = sinceKey < Stopwatch.GetElapsedTime(p.PastedAt).TotalSeconds;
+        var name = p.Target.ProcessName.Length > 0 ? p.Target.ProcessName : "the app";
+        return new PasteBack(name, !typedSince, (newText, replace) => PasteBackAsync(newText, replace, p.Target));
+    }
+
+    private async Task PasteBackAsync(string text, bool replace, FrontmostApp target)
+    {
+        if (_state != State.Idle)
+            return;
+        try
+        {
+            // The transcript window had the focus: give it back to the app the dictation went into
+            if (!target.Activate())
+            {
+                Dialogs.Notify($"{target.ProcessName} is no longer running; copy the text instead");
+                return;
+            }
+            for (var i = 0; i < 20 && FrontmostApp.Capture().ProcessId != target.ProcessId; i++)
+                await Task.Delay(50);
+            if (FrontmostApp.Capture().ProcessId != target.ProcessId)
+            {
+                Dialogs.Notify($"Could not switch back to {target.ProcessName}; copy the text instead");
+                return;
+            }
+            await Task.Delay(120); // the app focuses its text field again
+
+            var cfg = _config.Current;
+            var trimmed = text.Trim();
+            var insert = cfg.Insert.AppendTrailingSpace ? trimmed + " " : trimmed;
+            Log.Info(replace ? "Transcript window: replacing the dictation" : "Transcript window: pasting at the cursor");
+            var pastedAt = Stopwatch.GetTimestamp();
+            if (replace)
+                await _inserter.ReplaceLastAsync(insert, target, cfg.Insert);
+            else
+                await _inserter.InsertAsync(insert, target, cfg.Insert);
+            // The new text is now the last paste: Replace again replaces it
+            _lastTranscript = trimmed;
+            _lastPaste = (trimmed, target, pastedAt);
+        }
+        catch (Exception ex)
+        {
+            ReportError(replace ? "Replacing the dictation failed" : "Pasting the text failed", ex);
+        }
     }
 
     /// <summary>Shows the system Accessibility prompt if the permission is missing (needed for the hotkey and for Cmd+V).</summary>
@@ -472,8 +515,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
 
         if (!cfg.Autocomplete.IsOn)
             StopAutocomplete();
-        if (!cfg.Polish.Enabled)
-            DismissProposal();
         if (!IsLanguageModelWanted && _llama.IsLoaded)
             _llama.Unload();
 
@@ -541,7 +582,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         if (cfg.Ui.ShowOverlay)
             _overlay.ShowRecording(_pressedAt);
         _ = _pipeline.PrepareAsync();
-        DismissProposal();
         if (IsLanguageModelReady)
             _ = PreloadLanguageModelAsync();
         StartAutocomplete();
@@ -588,11 +628,14 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
             }
 
             var text = cfg.Insert.AppendTrailingSpace ? result.FinalText + " " : result.FinalText;
+            // Where it goes (the frontmost app may have changed while processing) and when, for the transcript's Replace;
+            // taken before the paste, as InsertAsync returns only after restoring the clipboard and a key pressed
+            // meanwhile is typing after the dictation
+            var pasted = (result.FinalText.Trim(), FrontmostApp.Capture(), Stopwatch.GetTimestamp());
             await _inserter.InsertAsync(text, _target, cfg.Insert);
+            _lastPaste = pasted;
             if (cfg.Autocomplete.IsOn)
                 _autocompleter.Remember(_target?.ProcessName, result.FinalText);
-            if (cfg.Polish.Enabled && CanPolish)
-                _ = ProposePolishedAsync(result.FinalText, _target, Stopwatch.GetTimestamp());
         }
         catch (Exception ex)
         {
@@ -645,16 +688,11 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _history.Add(record);
     }
 
-    // ---- Language model: autocomplete and grammar check ----
+    // ---- Language model: autocomplete, translation and the transcript window's tools ----
 
+    /// <summary>Something keeps the local model in use (the transcript window's tools load it on demand).</summary>
     private bool IsLanguageModelWanted =>
-        _config.Current.Autocomplete.IsOn || IsPolishingLocally || IsTranslatingLocally;
-
-    /// <summary>The grammar check is on and uses the local model (not Gemini or Groq).</summary>
-    private bool IsPolishingLocally => _config.Current.Polish.Enabled && Polisher.CloudName(_config.Current) == null;
-
-    /// <summary>Something can check grammar: a cloud engine with its key, or the local model installed.</summary>
-    private bool CanPolish => Polisher.CloudName(_config.Current) != null || IsLanguageModelInstalled;
+        _config.Current.Autocomplete.IsOn || IsTranslatingLocally;
 
     /// <summary>Listening translates, with the local model (not Gemini or Groq).</summary>
     private bool IsTranslatingLocally =>
@@ -726,88 +764,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _liveCompletion?.Cancel();
         _liveCompletion = null;
         _completionPanel.Hide();
-    }
-
-    /// <summary>After a dictation was pasted: asks for a polished version and proposes it if it differs.</summary>
-    private async Task ProposePolishedAsync(string original, FrontmostApp? target, long pastedAt)
-    {
-        DismissProposal();
-        var request = _polishRequest = new CancellationTokenSource();
-        try
-        {
-            var polished = await _polisher.PolishAsync(original, request.Token);
-            if (polished == null || request.IsCancellationRequested || _state == State.Recording)
-                return;
-            _proposal = (original, polished, target, pastedAt);
-            _polishPanel.Show(TextDiff.Changes(original, polished), TimeSpan.FromSeconds(Math.Max(3, _config.Current.Polish.DisplaySeconds)));
-        }
-        catch (OperationCanceledException) when (request.IsCancellationRequested)
-        {
-            // A new dictation came first
-        }
-        catch (Exception ex)
-        {
-            // The dictation itself succeeded; a notification for a failed check would be noise
-            Log.Warn($"Grammar check failed: {(ex is OperationCanceledException ? "timed out" : ex.Message)}");
-        }
-        finally
-        {
-            if (_polishRequest == request)
-                _polishRequest = null;
-            request.Dispose();
-        }
-    }
-
-    private void DismissProposal()
-    {
-        _polishRequest?.Cancel();
-        _polishRequest = null;
-        _proposal = null;
-        _polishPanel.Hide();
-    }
-
-    /// <summary>
-    /// Insert: replaces the pasted dictation with the polished text (undo + paste). If the user typed since, or switched
-    /// apps, undo would hit something else, so the text is pasted at the cursor instead.
-    /// </summary>
-    private async Task InsertProposalAsync()
-    {
-        if (_proposal is not { } p || _state != State.Idle)
-            return;
-        DismissProposal();
-
-        var cfg = _config.Current;
-        var text = cfg.Insert.AppendTrailingSpace ? p.Polished + " " : p.Polished;
-        var sinceKey = MacNative.CGEventSourceSecondsSinceLastEventType(MacNative.kCGEventSourceStateHIDSystemState, MacNative.kCGEventKeyDown);
-        var typedSince = sinceKey < Stopwatch.GetElapsedTime(p.PastedAt).TotalSeconds;
-        var sameApp = p.Target == null || FrontmostApp.Capture().ProcessId == p.Target.ProcessId;
-        try
-        {
-            if (!typedSince && sameApp)
-            {
-                Log.Info("Grammar check: replacing the dictation with the polished text");
-                await _inserter.ReplaceLastAsync(text, p.Target, cfg.Insert);
-            }
-            else
-            {
-                Log.Info("Grammar check: pasting the polished text at the cursor (typed or switched apps since the dictation)");
-                await _inserter.InsertAsync(text, p.Target, cfg.Insert);
-            }
-            _lastTranscript = p.Polished;
-        }
-        catch (Exception ex)
-        {
-            ReportError("Inserting the polished text failed", ex);
-        }
-    }
-
-    private void CopyProposal()
-    {
-        if (_proposal is not { } p)
-            return;
-        MacTextInserter.Copy(p.Polished);
-        DismissProposal();
-        Dialogs.Notify("Polished text copied");
     }
 
     // ---- Listening: system audio → notes, optionally translated ----
@@ -1119,7 +1075,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         }
 
         StopAutocomplete();
-        DismissProposal();
         _stt.Unload();
         _llama.Unload();
         _voiceprints.Unload();
@@ -1359,7 +1314,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _llmDownload?.Cancel.Cancel();
         _voiceDownload?.Cancel.Cancel();
         _liveCompletion?.Cancel();
-        _polishRequest?.Cancel();
         _listening?.Cancel();
         _systemAudio.Dispose();
         _listenMicrophone.Dispose();
@@ -1374,7 +1328,6 @@ internal sealed class MenuBarApp : IAppHost, IDisposable
         _llama.Dispose();
         _overlay.Dispose();
         _completionPanel.Dispose();
-        _polishPanel.Dispose();
         _listenPanel.Dispose();
         try
         {
